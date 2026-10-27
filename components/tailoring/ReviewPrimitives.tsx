@@ -3,6 +3,7 @@ import { Pressable, View } from "react-native";
 import { Text } from "@/components/ui/text";
 import LucideIcon, { type IconName } from "@/lib/icons/LucideIcon";
 import { cn } from "@/lib/utils";
+import { useTheme } from "@/theming/ThemeProvider";
 import {
   atsScore,
   type ChangeSummary,
@@ -335,36 +336,41 @@ export function KeywordOption({
   disabled: boolean;
   onPress: () => void;
 }) {
+  const { theme } = useTheme();
+  const rowStyle = {
+    borderColor: selected ? theme.colors.primary : theme.colors.border,
+    opacity: disabled ? 0.6 : 1,
+  };
+  const checkboxStyle = {
+    borderColor: selected ? theme.colors.primary : theme.colors.mutedForeground,
+    backgroundColor: selected ? theme.colors.primary : "transparent",
+  };
+  const checkStyle = { opacity: selected ? 1 : 0 };
+  // Keep NativeWind classes stable when toggling; selection only changes RN styles.
   return (
     <Pressable
       accessibilityRole="checkbox"
       accessibilityLabel={attestation ? `I have this skill: ${keyword}` : keyword}
       accessibilityState={{ checked: selected, disabled }}
-      aria-checked={selected}
-      aria-disabled={disabled}
       disabled={disabled}
       onPress={onPress}
-      className={cn(
-        "min-h-16 flex-row items-center gap-3 rounded-2xl border bg-card px-4 py-3.5 active:bg-secondary",
-        selected ? "border-primary/60 bg-primary/5" : "border-border",
-        disabled && "opacity-60",
-      )}
+      className="min-h-16 flex-row items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3.5"
+      style={rowStyle}
     >
       <Text className="text-h6 flex-1 leading-5 text-foreground">{keyword}</Text>
       {attestation ? (
-        <Text className={cn("text-caption", selected ? "text-primary" : "text-muted-foreground")}>
+        <Text
+          className="text-caption text-muted-foreground"
+          style={{ color: selected ? theme.colors.primary : theme.colors.mutedForeground }}
+        >
           I have this
         </Text>
       ) : null}
       <View
-        className={cn(
-          "h-6 w-6 items-center justify-center rounded-lg border",
-          selected ? "border-primary bg-primary" : "border-muted-foreground/50",
-        )}
+        className="h-6 w-6 items-center justify-center rounded-lg border border-muted-foreground/50"
+        style={checkboxStyle}
       >
-        {selected ? (
-          <LucideIcon name="Check" size={15} className="text-primary-foreground" />
-        ) : null}
+        <LucideIcon name="Check" size={15} className="text-primary-foreground" style={checkStyle} />
       </View>
     </Pressable>
   );

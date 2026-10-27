@@ -29,6 +29,7 @@ import {
   type ResumeChange,
   type ReviewStep,
 } from "@/lib/tailoring/types";
+import { reviewWarningsForStep } from "@/lib/tailoring/warnings";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { useTheme } from "@/theming/ThemeProvider";
 import LucideIcon from "@/lib/icons/LucideIcon";
@@ -269,6 +270,9 @@ export default function TailoringReviewScreen() {
         );
     }
   }
+  reviewWarningsForStep(review.warnings, run.step).forEach((message, index) =>
+    items.push({ id: `warning-${index}`, kind: "warning", message }),
+  );
   if (run.step === 1) {
     review.change_sections.forEach((section, index) => {
       const highRisk = section.items.some((change) => change.confidence === "high");
@@ -295,9 +299,6 @@ export default function TailoringReviewScreen() {
             : "Detailed comparisons are unavailable. Reload the review, then check the full resume before saving.",
       });
   }
-  review.warnings.forEach((message, index) =>
-    items.push({ id: `warning-${index}`, kind: "warning", message }),
-  );
   items.push({
     id: "resume-toggle",
     kind: "section",
@@ -414,6 +415,7 @@ export default function TailoringReviewScreen() {
       <FlatList
         ref={list}
         data={items}
+        extraData={run.selectedKeywords}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => <View className="mb-3">{renderItem(item)}</View>}
         showsVerticalScrollIndicator={false}
@@ -483,8 +485,8 @@ export default function TailoringReviewScreen() {
                 <AtsScoreCard review={review} />
                 <SafetyNote message="Only select skills you really have. Expect questions about them in interviews." />
                 <Text className="text-caption text-muted-foreground">
-                  {options.remaining_slots} keyword slots remaining. Scores may rise, fall, or stay
-                  the same.
+                  {options.remaining_slots} keywords can still be applied (30 total per draft).
+                  Select several, then apply them together. Scores may rise, fall, or stay the same.
                 </Text>
               </>
             ) : null}

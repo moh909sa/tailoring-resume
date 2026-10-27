@@ -11,3 +11,5 @@
 - Processing displays only real Resume-Matcher stage progress; authenticated polling is independent of the authoritative preview request and never adds AI work.
 
 - Tailoring runs as a durable Railway background job; saved IDs and GET-only recovery survive backgrounding and relaunch without automatically repeating AI work.
+
+- Grounding checks appear alongside Changes and the final safety review with readable experience/bullet locations; keyword suggestions are never paginated by the backend application limit.
