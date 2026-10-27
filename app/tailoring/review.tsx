@@ -44,6 +44,25 @@ const stepCopy = [
   },
   { title: "Confirm & save", body: "One final check before saving your tailored CV." },
 ];
+// The backend's GROUNDING_REVIEW_REQUIRED marker is a meaningful safety
+// request, NOT a request failure. Surface it to people in Changes, with
+// understandable wording; do not suppress verification or alter the draft.
+function isGroundingWarning(message: string): boolean {
+  return message.startsWith("GROUNDING_REVIEW_REQUIRED:");
+}
+
+function readableReviewWarning(message: string): string {
+  const detail = message.match(
+    /^GROUNDING_REVIEW_REQUIRED:\s*Review\s+workExperience\[(\d+)\]\.description\[(\d+)\]\s+against the source resume\.?$/i,
+  );
+  if (detail) {
+    return `Please check bullet ${Number(detail[2]) + 1} in work experience ${Number(detail[1]) + 1}. Compare the updated wording with your original CV to make sure every claim is accurate.`;
+  }
+  return isGroundingWarning(message)
+    ? "Please review the highlighted experience changes against your original CV before saving."
+    : message;
+}
+
 type WizardItem =
   | { id: string; kind: "heading"; title: string; body: string }
   | { id: string; kind: "keyword"; keyword: string; attestation: boolean }
@@ -270,6 +289,12 @@ export default function TailoringReviewScreen() {
     }
   }
   if (run.step === 1) {
+    // Grounding warnings belong with actual Before/After changes, not the
+    // keyword picker's list of selectable skills.
+    review.warnings.forEach((message, index) => {
+      if (isGroundingWarning(message))
+        items.push({ id: `grounding-warning-${index}`, kind: "warning", message: readableReviewWarning(message) });
+    });
     review.change_sections.forEach((section, index) => {
       const highRisk = section.items.some((change) => change.confidence === "high");
       items.push({
@@ -295,9 +320,11 @@ export default function TailoringReviewScreen() {
             : "Detailed comparisons are unavailable. Reload the review, then check the full resume before saving.",
       });
   }
-  review.warnings.forEach((message, index) =>
-    items.push({ id: `warning-${index}`, kind: "warning", message }),
-  );
+  review.warnings.forEach((message, index) => {
+    if (isGroundingWarning(message) && run.step !== 2) return;
+    if (!isGroundingWarning(message) && run.step === 0) return;
+    items.push({ id: `warning-${index}`, kind: "warning", message: readableReviewWarning(message) });
+  });
   items.push({
     id: "resume-toggle",
     kind: "section",

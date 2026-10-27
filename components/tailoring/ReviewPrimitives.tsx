@@ -322,6 +322,11 @@ export function SectionToggle({
     </Pressable>
   );
 }
+// Keep selected state out of NativeWind className updates. React Native
+// CSS interop can destabilize Expo Router navigation context on iOS preview
+// when conditional translucent backgrounds are toggled on press.
+const KEYWORD_SELECTED_COLOR = "#6654FF";
+
 export function KeywordOption({
   keyword,
   attestation,
@@ -340,27 +345,29 @@ export function KeywordOption({
       accessibilityRole="checkbox"
       accessibilityLabel={attestation ? `I have this skill: ${keyword}` : keyword}
       accessibilityState={{ checked: selected, disabled }}
-      aria-checked={selected}
-      aria-disabled={disabled}
       disabled={disabled}
       onPress={onPress}
-      className={cn(
-        "min-h-16 flex-row items-center gap-3 rounded-2xl border bg-card px-4 py-3.5 active:bg-secondary",
-        selected ? "border-primary/60 bg-primary/5" : "border-border",
-        disabled && "opacity-60",
-      )}
+      className="min-h-16 flex-row items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3.5"
+      style={{
+        borderColor: selected ? KEYWORD_SELECTED_COLOR : undefined,
+        opacity: disabled ? 0.6 : 1,
+      }}
     >
       <Text className="text-h6 flex-1 leading-5 text-foreground">{keyword}</Text>
       {attestation ? (
-        <Text className={cn("text-caption", selected ? "text-primary" : "text-muted-foreground")}>
+        <Text
+          className="text-caption text-muted-foreground"
+          style={selected ? { color: KEYWORD_SELECTED_COLOR } : undefined}
+        >
           I have this
         </Text>
       ) : null}
       <View
-        className={cn(
-          "h-6 w-6 items-center justify-center rounded-lg border",
-          selected ? "border-primary bg-primary" : "border-muted-foreground/50",
-        )}
+        className="h-6 w-6 items-center justify-center rounded-lg border border-muted-foreground/50"
+        style={{
+          borderColor: selected ? KEYWORD_SELECTED_COLOR : undefined,
+          backgroundColor: selected ? KEYWORD_SELECTED_COLOR : "transparent",
+        }}
       >
         {selected ? (
           <LucideIcon name="Check" size={15} className="text-primary-foreground" />
