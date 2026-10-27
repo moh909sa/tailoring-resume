@@ -1,4 +1,5 @@
-import { TailoringProvider } from "@/lib/tailoring/TailoringProvider";
+import { router, usePathname, useRootNavigationState, useGlobalSearchParams } from "expo-router";
+import { TailoringProvider, useTailoring } from "@/lib/tailoring/TailoringProvider";
 import "@/global.css";
 import "@/appearance-polyfill";
 
@@ -37,6 +38,10 @@ export {
 } from "expo-router";
 
 function RootContent() {
+  const tailoring = useTailoring();
+  const pathname = usePathname();
+  const routeParams = useGlobalSearchParams<{ tailoringId?: string }>();
+  const navigation = useRootNavigationState();
   const hasMounted = React.useRef(false);
   const [portalContainer, setPortalContainer] = React.useState<View | null>(null);
   const { isDarkColorScheme } = useColorScheme();
@@ -97,6 +102,36 @@ function RootContent() {
       SplashScreen.hideAsync();
     }
   }, [isLoadingFonts]);
+
+  React.useEffect(() => {
+    if (!navigation?.key || isLoadingFonts || !isColorSchemeLoaded) return;
+    if (tailoring.pendingJobReview && tailoring.tailoringId && tailoring.status === "success") {
+      // Processing keeps its existing success navigation. Recovery from Home
+      // or a fresh launch opens the exact saved job's review here.
+      if (pathname === "/tailoring/review" && routeParams.tailoringId === tailoring.tailoringId)
+        tailoring.acknowledgeJobNavigation();
+      else if (pathname !== "/tailoring/processing")
+        router.replace({
+          pathname: "/tailoring/review",
+          params: { tailoringId: tailoring.tailoringId },
+        });
+    } else if (tailoring.pendingJobProcessing && tailoring.progressId) {
+      if (pathname !== "/tailoring/processing") router.replace("/tailoring/processing");
+      else tailoring.acknowledgeJobNavigation();
+    }
+  }, [
+    navigation?.key,
+    isLoadingFonts,
+    isColorSchemeLoaded,
+    pathname,
+    routeParams.tailoringId,
+    tailoring.pendingJobReview,
+    tailoring.pendingJobProcessing,
+    tailoring.tailoringId,
+    tailoring.progressId,
+    tailoring.status,
+    tailoring.acknowledgeJobNavigation,
+  ]);
 
   if (!isColorSchemeLoaded || isLoadingFonts) {
     return null;

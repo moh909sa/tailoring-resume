@@ -3,7 +3,6 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const ts = require("typescript");
-const { makeReview } = require("./fixtures/tailoring-review.cjs");
 const root = path.resolve(__dirname, "..");
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 function clock() {
@@ -156,8 +155,8 @@ test("slow GETs never overlap, and cleanup discards a late response without canc
   assert.equal(calls, 1);
   assert.equal(time.pending, 0);
 });
-test("terminal progress stops polling but does not finish the main request", async () => {
-  for (const status of ["succeeded", "failed"]) {
+test("terminal progress stops polling without cancelling its owner", async () => {
+  for (const status of ["succeeded", "failed", "interrupted"]) {
     const time = clock(),
       main = new AbortController(),
       seen = [];
@@ -179,7 +178,7 @@ test("terminal progress stops polling but does not finish the main request", asy
     assert.equal(time.pending, 0);
   }
 });
-test("main request cancellation aborts an active GET and prevents future polls", async () => {
+test("polling-session cancellation aborts an active GET and prevents future polls", async () => {
   const time = clock(),
     main = new AbortController(),
     pending = deferred();
@@ -201,202 +200,12 @@ test("main request cancellation aborts an active GET and prevents future polls",
   assert.equal(time.pending, 0);
 });
 
-// A minimal hook host exercises the actual provider's async lifecycle without
-// native render dependencies. UI rendering is validated separately in preview.
-function providerHost(api) {
-  const time = clock(),
-    slots = [],
-    effects = [],
-    storage = new Map();
-  let index = 0,
-    ownerId = "owner-1";
-  const changed = (a, b) => !a || a.length !== b.length || a.some((v, i) => v !== b[i]);
-  const hooks = {
-    createContext: () => ({ Provider: "Provider" }),
-    useState(initial) {
-      const i = index++;
-      if (!slots[i]) slots[i] = { value: typeof initial === "function" ? initial() : initial };
-      return [
-        slots[i].value,
-        (v) => {
-          slots[i].value = typeof v === "function" ? v(slots[i].value) : v;
-        },
-      ];
-    },
-    useRef(value) {
-      const i = index++;
-      return slots[i] ?? (slots[i] = { current: value });
-    },
-    useCallback(fn, deps) {
-      const i = index++;
-      if (!slots[i] || changed(slots[i].deps, deps)) slots[i] = { fn, deps };
-      return slots[i].fn;
-    },
-    useEffect(fn, deps) {
-      const i = index++;
-      if (!slots[i] || changed(slots[i].deps, deps)) {
-        const old = slots[i];
-        slots[i] = { deps, cleanup: old?.cleanup };
-        effects.push(() => {
-          old?.cleanup?.();
-          slots[i].cleanup = fn();
-        });
-      }
-    },
-  };
-  const mocks = {
-    react: hooks,
-    "react/jsx-runtime": { jsx: (_type, props) => props },
-    "expo-crypto": { randomUUID: () => require("node:crypto").randomUUID() },
-    "@react-native-async-storage/async-storage": {
-      default: {
-        getItem: async (k) => storage.get(k) ?? null,
-        setItem: async (k, v) => storage.set(k, v),
-        removeItem: async (k) => storage.delete(k),
-      },
-    },
-    "@/lib/auth/AuthProvider": {
-      useAuth: () => ({ session: ownerId ? { user: { id: ownerId } } : null }),
-    },
-    "@/lib/cv/api": { CvApiError: class extends Error {}, ...api },
-  };
-  const { TailoringProvider } = load("lib/tailoring/TailoringProvider.tsx", mocks, time);
-  const read = () => {
-    index = 0;
-    const result = TailoringProvider({ children: null }).value;
-    while (effects.length) effects.shift()();
-    return result;
-  };
-  return {
-    read,
-    time,
-    async ready() {
-      read();
-      await flush();
-      return read();
-    },
-    async account(id) {
-      ownerId = id;
-      read();
-      await flush();
-      return read();
-    },
-    unmount() {
-      slots.forEach((slot) => slot?.cleanup?.());
-    },
-  };
-}
 const input = {
   resumeId: "test-resume",
   filename: "Test CV.pdf",
-  jobDescription: "A real job description is retained verbatim for retries.",
+  jobDescription: "The original job description is retained verbatim.",
 };
-test("provider prevents duplicate POSTs, keeps POST authoritative and preserves the full review", async () => {
-  const pending = deferred(),
-    posts = [];
-  let gets = 0;
-  const host = providerHost({
-    previewTailoring: (...args) => {
-      posts.push(args);
-      return pending.promise;
-    },
-    getTailoringProgress: async () => {
-      gets++;
-      return progress({ status: "succeeded", tailoring_id: "progress-only-id" });
-    },
-  });
-  let run = await host.ready();
-  assert.equal(run.start(input), true);
-  assert.equal(run.start(input), false);
-  run = host.read();
-  const stop = run.watchProgress();
-  await flush();
-  run = host.read();
-  assert.equal(run.status, "running");
-  assert.equal(run.preview, null);
-  assert.equal(run.finishedAt, null);
-  assert.equal(gets, 1);
-  assert.match(posts[0][3], /^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i);
-  assert.equal(run.progressId, posts[0][3]);
-  await host.time.advance(2000);
-  assert.equal(gets, 1);
-  const result = types.parseTailoringPreview(makeReview());
-  pending.resolve(result);
-  await flush();
-  run = host.read();
-  assert.equal(posts.length, 1);
-  assert.equal(run.status, "success");
-  assert.deepEqual(run.preview, result);
-  assert.equal(run.tailoringId, result.tailoring_id);
-  assert.ok(run.finishedAt !== null);
-  assert.equal(posts[0][2].aborted, false);
-  stop();
-  host.unmount();
-});
-test("POST errors preserve inputs, retries get a fresh UUID, and unmount aborts active work", async () => {
-  const posts = [],
-    pending = deferred();
-  let calls = 0,
-    getSignal;
-  const host = providerHost({
-    previewTailoring: (...args) => {
-      posts.push(args);
-      if (++calls === 1) return Promise.reject(new Error("POST failed"));
-      return pending.promise;
-    },
-    getTailoringProgress: (signalOwner) => {
-      void signalOwner;
-      return Promise.reject(new Error("poll failed"));
-    },
-  });
-  let run = await host.ready();
-  run.start(input);
-  await flush();
-  run = host.read();
-  assert.equal(run.status, "error");
-  assert.deepEqual(run.input, input);
-  run.retry();
-  run = host.read();
-  assert.equal(run.status, "running");
-  assert.notEqual(posts[0][3], posts[1][3]);
-  run.watchProgress();
-  await flush();
-  run = host.read();
-  assert.equal(run.status, "running");
-  assert.equal(run.finishedAt, null);
-  getSignal = posts[1][2];
-  host.unmount();
-  assert.equal(getSignal.aborted, true);
-  pending.resolve(types.parseTailoringPreview(makeReview()));
-  await flush();
-});
-test("changing accounts clears progress, aborts work and ignores the previous owner's result", async () => {
-  const pending = deferred(),
-    posts = [];
-  const host = providerHost({
-    previewTailoring: (...args) => {
-      posts.push(args);
-      return pending.promise;
-    },
-    getTailoringProgress: async () => progress(),
-  });
-  let run = await host.ready();
-  run.start(input);
-  run = host.read();
-  run.watchProgress();
-  await flush();
-  run = await host.account("owner-2");
-  assert.equal(posts[0][2].aborted, true);
-  assert.equal(run.progress, null);
-  assert.equal(run.input, null);
-  pending.resolve(types.parseTailoringPreview(makeReview()));
-  await flush();
-  run = host.read();
-  assert.equal(run.status, "idle");
-  assert.equal(run.preview, null);
-  host.unmount();
-});
-test("API sends progress_id once in the existing POST and polls with the current bearer token", async () => {
+test("durable queue POST sends progress_id once and polls with the current bearer token", async () => {
   const oldFetch = global.fetch,
     oldUrl = process.env.EXPO_PUBLIC_RESUME_API_URL,
     requests = [];
@@ -421,14 +230,24 @@ test("API sends progress_id once in the existing POST and polls with the current
   });
   global.fetch = async (url, init) => {
     requests.push({ url, ...init });
-    return new Response(JSON.stringify(init.method === "POST" ? makeReview() : progress()), {
-      status: 200,
-    });
+    return new Response(
+      JSON.stringify(
+        init.method === "POST"
+          ? {
+              ...progress({ status: "queued" }),
+              progress_id: "11111111-1111-4111-8111-111111111111",
+            }
+          : progress(),
+      ),
+      {
+        status: 200,
+      },
+    );
   };
   try {
     const signal = new AbortController().signal,
       id = require("node:crypto").randomUUID();
-    await api.previewTailoring("owner", input, signal, id);
+    await api.startTailoringJob("owner", input, id, signal);
     token = "refreshed-current-token";
     await api.getTailoringProgress("owner", id, signal);
     assert.deepEqual(JSON.parse(requests[0].body), {

@@ -19,10 +19,6 @@ export default function TailoringProcessingScreen() {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     if (!running) return;
-    return run.watchProgress();
-  }, [running, run.progressId, run.watchProgress]);
-  useEffect(() => {
-    if (!running) return;
     setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 1000);
     const back = BackHandler.addEventListener("hardwareBackPress", () => true);
@@ -78,13 +74,23 @@ export default function TailoringProcessingScreen() {
         </View>
         {run.status === "error" ? (
           <View className="mt-8 gap-4">
-            <Text className="text-h4 text-foreground">We couldn’t finish this time</Text>
+            <Text className="text-h4 text-foreground">
+              {run.jobStatus === "interrupted"
+                ? "Tailoring was interrupted"
+                : "We couldn’t finish this time"}
+            </Text>
             <Notice tone="error" message={run.error ?? "Please try again."} />
             <Text className="text-body leading-6 text-muted-foreground">
-              Your CV selection and job description are still here.
+              {run.input
+                ? "Your CV selection and job description are still here."
+                : "Your original CV is unchanged."}
             </Text>
-            <Button onPress={run.retry} className="h-14 rounded-2xl">
-              <Text>Retry</Text>
+            <Button
+              onPress={run.input ? run.retry : run.recoverJob}
+              disabled={run.jobRecovering}
+              className="h-14 rounded-2xl"
+            >
+              <Text>{run.input ? "Retry" : "Check job status"}</Text>
             </Button>
             <Button variant="ghost" onPress={editInputs}>
               <Text>Back to Tailor CV</Text>
@@ -92,6 +98,18 @@ export default function TailoringProcessingScreen() {
           </View>
         ) : run.status === "idle" ? (
           <View className="mt-8 gap-4">
+            {run.jobConnectionError ? (
+              <Notice tone="info" message={run.jobConnectionError} />
+            ) : null}
+            {run.jobConnectionError ? (
+              <Button
+                onPress={run.recoverJob}
+                disabled={run.jobRecovering}
+                className="h-14 rounded-2xl"
+              >
+                <Text>Check job status</Text>
+              </Button>
+            ) : null}
             <Text className="text-body text-center leading-6 text-muted-foreground">
               Choose your CV and paste a job description to get started.
             </Text>
@@ -108,9 +126,36 @@ export default function TailoringProcessingScreen() {
                 <LucideIcon name="FileCheck" size={17} className="text-success" />
               )}
               <Text className="text-h6 text-foreground">
-                {running ? "Preparing your tailored preview" : "Opening your review"}
+                {running
+                  ? run.jobStatus === "queued"
+                    ? "Your resume is queued"
+                    : "Preparing your tailored preview"
+                  : "Opening your review"}
               </Text>
             </View>
+            {run.jobConnectionError ? (
+              <View className="gap-3">
+                <Notice tone="info" message={run.jobConnectionError} />
+                <Button
+                  variant="outline"
+                  onPress={run.recoverJob}
+                  disabled={run.jobRecovering}
+                  className="h-12 rounded-2xl"
+                >
+                  <Text>Check job status</Text>
+                </Button>
+                {run.jobStatus === "unknown" && run.input ? (
+                  <Button
+                    variant="ghost"
+                    onPress={run.retry}
+                    disabled={run.jobRecovering}
+                    className="h-12 rounded-2xl"
+                  >
+                    <Text>Retry same job</Text>
+                  </Button>
+                ) : null}
+              </View>
+            ) : null}
             <View className="rounded-2xl border border-border bg-card px-4 pb-1 pt-5">
               <StageTimeline progress={stageProgress(run.progress)} />
             </View>

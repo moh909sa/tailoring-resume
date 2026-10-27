@@ -9,3 +9,5 @@
 - Tailoring uses a three-step review with explicit skill attestation and final confirmation; only the server supplies scores and changes, and original CVs remain unchanged.
 
 - Processing displays only real Resume-Matcher stage progress; authenticated polling is independent of the authoritative preview request and never adds AI work.
+
+- Tailoring runs as a durable Railway background job; saved IDs and GET-only recovery survive backgrounding and relaunch without automatically repeating AI work.

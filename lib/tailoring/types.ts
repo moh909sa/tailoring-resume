@@ -256,16 +256,20 @@ export const PROGRESS_STAGE_KEYS = {
   verify_review: "verify",
 } as const satisfies Record<string, StageKey>;
 export type TailoringProgress = {
-  status: "running" | "succeeded" | "failed";
+  status: "queued" | "running" | "succeeded" | "failed" | "interrupted";
   current_step: string | null;
   completed_steps: string[];
   visited_steps: string[];
   tailoring_id: string | null;
+  progress_id?: string;
+  started_at?: string;
+  updated_at?: string;
+  error_code?: string;
 };
 export function parseTailoringProgress(value: unknown): TailoringProgress {
   if (
     !isRecord(value) ||
-    !["running", "succeeded", "failed"].includes(String(value.status)) ||
+    !["queued", "running", "succeeded", "failed", "interrupted"].includes(String(value.status)) ||
     (value.current_step != null && typeof value.current_step !== "string") ||
     !Array.isArray(value.completed_steps) ||
     !value.completed_steps.every((step) => typeof step === "string") ||
@@ -280,7 +284,26 @@ export function parseTailoringProgress(value: unknown): TailoringProgress {
     completed_steps: value.completed_steps,
     visited_steps: value.visited_steps,
     tailoring_id: typeof value.tailoring_id === "string" ? value.tailoring_id : null,
+    ...(typeof value.progress_id === "string" ? { progress_id: value.progress_id } : {}),
+    ...(typeof value.started_at === "string" ? { started_at: value.started_at } : {}),
+    ...(typeof value.updated_at === "string" ? { updated_at: value.updated_at } : {}),
+    ...(typeof value.error_code === "string" ? { error_code: value.error_code } : {}),
   };
+}
+export type TailoringJob = TailoringProgress & { progress_id: string };
+export function parseTailoringJob(value: unknown): TailoringJob {
+  const progress = parseTailoringProgress(value);
+  if (
+    !progress.progress_id ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(progress.progress_id)
+  )
+    throw new Error("The tailoring service returned an incomplete job reference.");
+  return { ...progress, progress_id: progress.progress_id };
+}
+export function parseRecentTailoringJobs(value: unknown): TailoringJob[] {
+  if (!isRecord(value) || !Array.isArray(value.jobs))
+    throw new Error("The tailoring service returned an incomplete recent jobs list.");
+  return value.jobs.map(parseTailoringJob);
 }
 export function stageProgress(progress: TailoringProgress | null): StageProgress {
   const stages: StageProgress = {};

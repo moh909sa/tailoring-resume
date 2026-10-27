@@ -1,5 +1,6 @@
 import { randomUUID } from "expo-crypto";
-import { pollTailoringProgress } from "@/lib/tailoring/progress";
+import { AppState } from "react-native";
+import { DurableTailoringJob, jobStorageKey, type SavedTailoringJob } from "@/lib/tailoring/jobs";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   createContext,
@@ -17,7 +18,9 @@ import {
   CvApiError,
   loadTailoringReview,
   getTailoringProgress,
-  previewTailoring,
+  startTailoringJob,
+  recentTailoringJobs,
+  tailoringJobResult,
 } from "@/lib/cv/api";
 import { isRecord } from "@/lib/cv/types";
 import {
@@ -45,6 +48,11 @@ type RunState = {
   preview: TailoringPreview | null;
   progressId: string | null;
   progress: TailoringProgress | null;
+  jobStatus: SavedTailoringJob["status"] | null;
+  jobRecovering: boolean;
+  jobConnectionError: string | null;
+  pendingJobReview: boolean;
+  pendingJobProcessing: boolean;
   startedAt: number | null;
   finishedAt: number | null;
   error: string | null;
@@ -66,6 +74,11 @@ const emptyRun: RunState = {
   preview: null,
   progressId: null,
   progress: null,
+  jobStatus: null,
+  jobRecovering: false,
+  jobConnectionError: null,
+  pendingJobReview: false,
+  pendingJobProcessing: false,
   startedAt: null,
   finishedAt: null,
   error: null,
@@ -80,7 +93,8 @@ const emptyRun: RunState = {
 };
 type TailoringContextValue = RunState & {
   start: (input: TailoringInput) => boolean;
-  watchProgress: () => () => void;
+  recoverJob: () => void;
+  acknowledgeJobNavigation: () => void;
   retry: () => void;
   reloadReview: (tailoringId?: string) => Promise<void>;
   applyKeywords: () => void;
@@ -125,7 +139,10 @@ function remainingSelections(
 }
 function restoredSnapshot(
   value: unknown,
-): Pick<RunState, "tailoringId" | "lastPreviewId" | "input" | "step" | "selectedKeywords"> | null {
+): Pick<
+  RunState,
+  "tailoringId" | "lastPreviewId" | "input" | "step" | "selectedKeywords" | "pendingJobReview"
+> | null {
   if (!isRecord(value) || typeof value.tailoringId !== "string" || !value.tailoringId) return null;
   const input =
     isRecord(value.input) &&
@@ -149,11 +166,23 @@ function restoredSnapshot(
     : [];
   return {
     tailoringId: value.tailoringId,
+    pendingJobReview: value.pendingJobReview === true,
     lastPreviewId: typeof value.previewId === "string" ? value.previewId : null,
     input,
     step: value.step === 1 || value.step === 2 ? value.step : 0,
     selectedKeywords,
   };
+}
+
+function reviewSnapshot(run: RunState): string {
+  return JSON.stringify({
+    tailoringId: run.tailoringId,
+    previewId: run.lastPreviewId,
+    input: run.input,
+    step: run.step,
+    selectedKeywords: run.selectedKeywords,
+    pendingJobReview: run.pendingJobReview,
+  });
 }
 
 export function TailoringProvider({ children }: { children: ReactNode }) {
@@ -162,11 +191,7 @@ export function TailoringProvider({ children }: { children: ReactNode }) {
   const owner = useRef(ownerId);
   owner.current = ownerId;
   const request = useRef<AbortController | null>(null);
-  const progressPolling = useRef<(() => void) | null>(null);
-  const stopProgressPolling = useCallback(() => {
-    progressPolling.current?.();
-    progressPolling.current = null;
-  }, []);
+  const jobs = useRef<DurableTailoringJob | null>(null);
   const restoredOwner = useRef<string | null>(null);
   const writes = useRef<Promise<unknown>>(Promise.resolve());
   const [run, setRun] = useState<RunState>(emptyRun);
@@ -175,44 +200,6 @@ export function TailoringProvider({ children }: { children: ReactNode }) {
     current.current = change(current.current);
     setRun(current.current);
   }, []);
-
-  useEffect(() => {
-    stopProgressPolling();
-    request.current?.abort();
-    request.current = null;
-    const previousOwner = restoredOwner.current;
-    restoredOwner.current = null;
-    if (previousOwner && previousOwner !== ownerId)
-      writes.current = writes.current
-        .then(() => AsyncStorage.removeItem(storageKey(previousOwner)))
-        .catch(() => undefined);
-    update(() => ({ ...emptyRun, ownerId, hydrating: !!ownerId }));
-    let active = true;
-    if (ownerId) {
-      void (async () => {
-        try {
-          await writes.current;
-          const raw = await AsyncStorage.getItem(storageKey(ownerId));
-          const value: unknown = raw ? JSON.parse(raw) : null;
-          const restored = restoredSnapshot(value);
-          if (active && owner.current === ownerId && restored)
-            update((state) => ({ ...state, ...restored, status: "success", needsReload: true }));
-        } catch {
-          // An unavailable device cache never prevents use of the server draft.
-        } finally {
-          if (active && owner.current === ownerId) {
-            restoredOwner.current = ownerId;
-            update((state) => ({ ...state, hydrating: false }));
-          }
-        }
-      })();
-    }
-    return () => {
-      active = false;
-      stopProgressPolling();
-      request.current?.abort();
-    };
-  }, [ownerId, update, stopProgressPolling]);
 
   useEffect(() => {
     if (
@@ -225,16 +212,7 @@ export function TailoringProvider({ children }: { children: ReactNode }) {
     const key = storageKey(run.ownerId);
     // Persist only the draft pointer, form inputs, step and explicit choices.
     // Resume contents and auth tokens are not copied into this cache.
-    const value =
-      run.tailoringId && !run.saved
-        ? JSON.stringify({
-            tailoringId: run.tailoringId,
-            previewId: run.lastPreviewId,
-            input: run.input,
-            step: run.step,
-            selectedKeywords: run.selectedKeywords,
-          })
-        : null;
+    const value = run.tailoringId && !run.saved ? reviewSnapshot(run) : null;
     writes.current = writes.current
       .then(() => (value ? AsyncStorage.setItem(key, value) : AsyncStorage.removeItem(key)))
       .catch(() => undefined);
@@ -248,6 +226,7 @@ export function TailoringProvider({ children }: { children: ReactNode }) {
     run.step,
     run.selectedKeywords,
     run.saved,
+    run.pendingJobReview,
   ]);
 
   const activeRequest = useCallback(
@@ -278,38 +257,136 @@ export function TailoringProvider({ children }: { children: ReactNode }) {
     [ownerId, update],
   );
 
-  const watchProgress = useCallback(() => {
-    const state = current.current;
-    const main = request.current;
-    if (
-      !ownerId ||
-      state.ownerId !== ownerId ||
-      state.status !== "running" ||
-      !state.progressId ||
-      !main
-    )
-      return () => {};
-    stopProgressPolling();
-    const progressId = state.progressId;
-    const stop = pollTailoringProgress(
-      (signal) => getTailoringProgress(ownerId, progressId, signal),
-      (progress) => {
-        if (
-          owner.current === ownerId &&
-          current.current.progressId === progressId &&
-          current.current.status === "running" &&
-          !main.signal.aborted
-        )
-          update((value) => ({ ...value, progress }));
+  useEffect(() => {
+    request.current?.abort();
+    request.current = null;
+    const previousOwner = restoredOwner.current;
+    restoredOwner.current = null;
+    if (previousOwner && previousOwner !== ownerId)
+      writes.current = writes.current
+        .then(() => AsyncStorage.removeItem(storageKey(previousOwner)))
+        .catch(() => undefined);
+    update(() => ({ ...emptyRun, ownerId, hydrating: !!ownerId }));
+    let active = true;
+    if (!ownerId) return;
+    const manager = new DurableTailoringJob({
+      uuid: randomUUID,
+      read: () => AsyncStorage.getItem(jobStorageKey(ownerId)),
+      write: (value) => AsyncStorage.setItem(jobStorageKey(ownerId), value),
+      submit: (input, id, signal) => startTailoringJob(ownerId, input, id, signal),
+      recent: (signal) => recentTailoringJobs(ownerId, signal),
+      progress: (id, signal) => getTailoringProgress(ownerId, id, signal),
+      result: (id, signal) => tailoringJobResult(ownerId, id, signal),
+      onState: (state) => {
+        if (!active || owner.current !== ownerId) return;
+        update((value) => {
+          const job = state.job;
+          const tracking = job && !job.delivered;
+          const terminal =
+            job?.status === "failed" || job?.status === "interrupted" || !!state.terminalError;
+          const finished = state.progress?.updated_at ? Date.parse(state.progress.updated_at) : NaN;
+          const newSubmission = job && state.submitting && value.progressId !== job.progressId;
+          const regenerating =
+            value.preview &&
+            !value.saved &&
+            job?.input?.resumeId === value.input?.resumeId &&
+            job?.input?.jobDescription === value.input?.jobDescription;
+          return {
+            ...value,
+            ...(newSubmission
+              ? {
+                  preview: regenerating ? value.preview : null,
+                  tailoringId: regenerating ? value.tailoringId : null,
+                  lastPreviewId: regenerating ? value.lastPreviewId : null,
+                  selectedKeywords: regenerating ? value.selectedKeywords : [],
+                  step: 0 as const,
+                  saved: false,
+                  confirmation: null,
+                  needsReload: false,
+                  pendingJobReview: false,
+                  pendingJobProcessing: false,
+                }
+              : {}),
+            jobRecovering: state.recovering || state.submitting,
+            jobConnectionError: state.connectionError,
+            jobStatus: job?.status ?? null,
+            ...(tracking
+              ? {
+                  status: terminal ? ("error" as const) : ("running" as const),
+                  progressId: job.progressId,
+                  progress: state.progress,
+                  input: job.input,
+                  startedAt: job.startedAt,
+                  finishedAt:
+                    terminal || job.status === "succeeded"
+                      ? Number.isFinite(finished)
+                        ? finished
+                        : (value.finishedAt ?? Date.now())
+                      : null,
+                  error: state.terminalError,
+                  pendingJobProcessing:
+                    value.pendingJobProcessing ||
+                    (state.recovering && value.progressId !== job.progressId),
+                }
+              : {}),
+            ...(state.terminalError
+              ? { status: "error" as const, error: state.terminalError }
+              : {}),
+          };
+        });
       },
-      main.signal,
+      onResult: async (preview, job) => {
+        if (!active || owner.current !== ownerId) return;
+        const newReview = current.current.tailoringId !== preview.tailoring_id;
+        if (current.current.preview?.tailoring_id !== preview.tailoring_id) acceptPreview(preview);
+        update((value) => ({
+          ...value,
+          input: job.input,
+          step: newReview ? 0 : value.step,
+          progressId: job.progressId,
+          jobStatus: "succeeded",
+          finishedAt: value.finishedAt ?? Date.now(),
+          pendingJobReview: true,
+          pendingJobProcessing: false,
+        }));
+        // Persist the review reference before the durable job is marked delivered.
+        const snapshot = reviewSnapshot(current.current);
+        writes.current = writes.current
+          .catch(() => undefined)
+          .then(() => AsyncStorage.setItem(storageKey(ownerId), snapshot));
+        await writes.current;
+      },
+    });
+    jobs.current = manager;
+    manager.setActive(AppState.currentState === null || AppState.currentState === "active");
+    const subscription = AppState.addEventListener("change", (state) =>
+      manager.setActive(state === "active"),
     );
-    progressPolling.current = stop;
+    void (async () => {
+      try {
+        await writes.current;
+        const raw = await AsyncStorage.getItem(storageKey(ownerId));
+        const restored = restoredSnapshot(raw ? (JSON.parse(raw) as unknown) : null);
+        if (active && owner.current === ownerId && restored)
+          update((state) => ({ ...state, ...restored, status: "success", needsReload: true }));
+      } catch {
+        /* The server can recover jobs without a device cache. */
+      } finally {
+        if (active && owner.current === ownerId) {
+          restoredOwner.current = ownerId;
+          update((state) => ({ ...state, hydrating: false, jobRecovering: true }));
+          await manager.restore();
+        }
+      }
+    })();
     return () => {
-      stop();
-      if (progressPolling.current === stop) progressPolling.current = null;
+      active = false;
+      manager.dispose();
+      subscription.remove();
+      request.current?.abort();
+      if (jobs.current === manager) jobs.current = null;
     };
-  }, [ownerId, stopProgressPolling, update]);
+  }, [ownerId, update, acceptPreview]);
 
   const start = useCallback(
     (input: TailoringInput): boolean => {
@@ -317,76 +394,20 @@ export function TailoringProvider({ children }: { children: ReactNode }) {
         !ownerId ||
         request.current ||
         current.current.hydrating ||
+        current.current.jobRecovering ||
         restoredOwner.current !== ownerId
       )
         return false;
-      const controller = new AbortController();
-      request.current = controller;
-      stopProgressPolling();
-      let progressId: string;
-      try {
-        progressId = randomUUID();
-      } catch {
-        request.current = null;
-        update(() => ({
-          ...emptyRun,
-          ownerId,
-          input,
-          status: "error",
-          error: "We couldn’t securely start tailoring. Please try again.",
-        }));
-        return true;
-      }
-      const previous = current.current;
-      const regenerating =
-        previous.preview &&
-        !previous.saved &&
-        previous.input?.resumeId === input.resumeId &&
-        previous.input?.jobDescription === input.jobDescription;
-      update(() => ({
-        ...emptyRun,
-        ownerId,
-        status: "running",
-        progressId,
-        input,
-        startedAt: Date.now(),
-        ...(regenerating
-          ? {
-              tailoringId: previous.tailoringId,
-              lastPreviewId: previous.lastPreviewId,
-              preview: previous.preview,
-              selectedKeywords: previous.selectedKeywords,
-            }
-          : {}),
-      }));
-      void (async () => {
-        try {
-          const preview = await previewTailoring(ownerId, input, controller.signal, progressId);
-          if (!activeRequest(controller)) return;
-          acceptPreview(preview);
-          update((state) => ({ ...state, finishedAt: Date.now() }));
-        } catch (error) {
-          if (activeRequest(controller))
-            update((state) => ({
-              ...state,
-              status: "error",
-              finishedAt: Date.now(),
-              error:
-                error instanceof Error
-                  ? error.message
-                  : "We couldn’t tailor your resume. Please try again.",
-            }));
-        } finally {
-          if (request.current === controller) {
-            stopProgressPolling();
-            request.current = null;
-          }
-        }
-      })();
-      return true;
+      return jobs.current?.start(input) ?? false;
     },
-    [ownerId, activeRequest, acceptPreview, update, stopProgressPolling],
+    [ownerId],
   );
+  const recoverJob = useCallback(() => {
+    void jobs.current?.recover();
+  }, []);
+  const acknowledgeJobNavigation = useCallback(() => {
+    update((value) => ({ ...value, pendingJobReview: false, pendingJobProcessing: false }));
+  }, [update]);
 
   const reloadReview = useCallback(
     async (requestedId?: string): Promise<void> => {
@@ -660,9 +681,10 @@ export function TailoringProvider({ children }: { children: ReactNode }) {
       value={{
         ...visible,
         start,
-        watchProgress,
+        recoverJob,
+        acknowledgeJobNavigation,
         retry: () => {
-          if (visible.status === "error" && visible.input) start(visible.input);
+          jobs.current?.retry();
         },
         reloadReview,
         applyKeywords: () => operate("keywords"),

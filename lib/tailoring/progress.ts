@@ -2,8 +2,8 @@ import type { TailoringProgress } from "@/lib/tailoring/types";
 
 export const PROGRESS_POLL_INTERVAL_MS = 1750;
 
-// Independent from the AI request: a missing or unavailable progress record is
-// retried, never promoted to a tailoring failure. Only one GET runs at a time.
+// Progress reads never own the durable worker. Missing/unavailable records retry
+// independently, with only one GET at a time.
 export function pollTailoringProgress(
   load: (signal: AbortSignal) => Promise<TailoringProgress>,
   onProgress: (progress: TailoringProgress) => void,
@@ -25,10 +25,10 @@ export function pollTailoringProgress(
       const progress = await load(controller.signal);
       if (stopped) return;
       onProgress(progress);
-      if (progress.status !== "running") stop();
+      if (progress.status !== "running" && progress.status !== "queued") stop();
     } catch {
       // Includes the brief registration 404 and transient network/auth errors.
-      // The POST remains authoritative and owns its own error handling.
+      // Recovery and saved-result retrieval have their own error handling.
     } finally {
       if (!stopped)
         timer = setTimeout(

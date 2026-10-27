@@ -9,7 +9,7 @@ An Expo iOS, Android, and web app with Home, Tailor, and Library bottom tabs. Ho
 - Upload: `POST /api/v1/mobile/resumes/upload`, multipart field `file`
 - List: `GET /api/v1/mobile/resumes`, an array of CV metadata
 - Delete: `DELETE /api/v1/mobile/resumes/{id}`, HTTP 204 on success
-- Preview: `POST /api/v1/mobile/tailor/preview`, JSON `resume_id`, `job_description`, and secure UUIDv4 `progress_id`; no length or intensity preferences
+- Background tailoring: `POST /api/v1/mobile/tailor/jobs` (HTTP 202), JSON `resume_id`, `job_description`, and secure UUIDv4 `progress_id`; no length or intensity preferences
 - All requests use the current Supabase user access token as a bearer token. The app does not access Supabase Storage directly or create infrastructure; Railway owns file and record removal.
 
 ## Configuration
@@ -50,14 +50,15 @@ Railway's `CORS_ORIGINS` must include the exact browser origins, preserving any 
 
 Tailor CV generates real previews from Ready originals and pasted job descriptions of 50–12,000 characters. Job URL input remains on the form, with guidance to paste the description for tailoring. No page limits, bullet limits, or intensity preferences are sent.
 
-`lib/tailoring/TailoringProvider.tsx` retains the input and full response in owner-scoped memory, prevents duplicate operations, and aborts and clears data when accounts change. AsyncStorage keeps only the draft reference, last preview ID, form inputs, review step, and explicit keyword choices. Resume contents reload from the authenticated Railway review endpoint. The synchronous AI requests wait up to ten minutes. Errors preserve the current draft and inputs; mutations are never automatically retried.
+`lib/tailoring/TailoringProvider.tsx` keeps the existing owner-scoped review workflow. `lib/tailoring/jobs.ts` manages durable background jobs with the same authenticated API client. Each new job gets a secure Expo Crypto UUIDv4. Its ID, exact form inputs, and start time are written to owner-scoped AsyncStorage before the short `POST /api/v1/mobile/tailor/jobs` request. The backend’s canonical progress ID is persisted on acceptance. Device storage failure prevents submission.
 
-The full-screen processing route preserves its animated document indicator, wall-clock elapsed time, and seven-stage layout. Each initial request gets a fresh cryptographically secure UUIDv4 from `expo-crypto`, sent as `progress_id` with the existing preview POST. While the screen is mounted and the POST runs, `lib/tailoring/progress.ts` polls `GET /api/v1/mobile/tailor/progress/{progress_id}` every 1.75 seconds with the current Supabase bearer token. GETs never overlap and time out independently after eight seconds.
+The processing screen preserves its document animation, elapsed-time counter, seven stages, and styling. Foreground jobs poll `GET /api/v1/mobile/tailor/progress/{progress_id}` every 1.75 seconds with no overlapping reads. Queued jobs continue polling. Checks come only from `completed_steps`; only a running `current_step` spins, and optional/visited-only steps remain muted. The counter uses persisted/server timestamps and never advances stages.
 
-Engine IDs map to the existing labels: `read_job`, `plan_skills`, `tailor_resume`, `keywords_facts`, `critique_writing`, `rewrite_lines`, and `verify_review`. Checks come only from `completed_steps`; only the running `current_step` spins. `visited_steps` never implies completion, and optional/unvisited stages remain visible and muted. No timer advances stages.
+AppState pauses reads while backgrounded and reconciles them on foreground. Startup checks the saved job and `GET /api/v1/mobile/tailor/jobs/recent`, including recovery if the acceptance response was lost. Queued/running/succeeded/failed/interrupted states come from the backend. The Railway worker continues independently of client requests or application lifetime.
 
-Initial registration 404s and temporary polling failures retry without changing the main POST, animation, timer, or inputs. Polling stops on terminal progress, POST success/error, cancellation, screen unmount, provider unmount, or account change. The successful preview POST remains authoritative: its full preview/review ends the elapsed timer and opens review automatically, even if the progress endpoint is unavailable. Progress success alone never navigates or invents a preview. Retry generates a fresh progress ID.
+On success, `GET /api/v1/mobile/tailor/jobs/{progress_id}/result` retrieves the existing preview/review, persists the review pointer, and opens the existing Keywords Review automatically. Root navigation waits for the navigator to mount and acknowledges recovery only after the destination is reached. A delivered-job marker prevents old completed jobs from reopening. The existing review cache still stores only references, inputs, step, selections, and pending review navigation; full CV contents are not cached.
 
+All automatic recovery uses GETs. Network interruption, restart, and lost HTTP 202 acknowledgements never trigger another AI submission. An explicit “Retry same job” resends the same idempotent progress ID when submission is unconfirmed. Explicit Retry for server-reported failed/interrupted jobs creates a fresh ID. Backgrounding/account changes/unmount cancel client transport only, and never delete the durable job reference or cancel the server worker.
 Success opens a three-step review wizard automatically. The Tailor screen links back to an unfinished review.
 
 1. **Optimize Keywords:** displays the backend ATS estimate and score history, supported and attestation-required suggestions, applied keywords, placements, warnings, and an expandable current resume. Users choose skills individually; “I have this” explicitly attests skills absent from the original. Every keyword request uses the latest `preview.preview_id`. The returned preview and review replace the current draft, enabling repeated applications within the backend limit of 30 keywords. Scores can rise, fall, or remain unchanged.
@@ -72,6 +73,6 @@ Review endpoints use the existing Supabase bearer token:
 
 409 conflicts and uncertain mutation outcomes reload the latest review without resubmitting. Validation errors preserve choices; expired previews require explicit regeneration with preserved inputs. Loading the Tailored CVs library, post-confirmation editing, and export are not connected.
 
-Run the response, diff, and authenticated-request regression tests with `node --test tests/tailoring-review.test.cjs tests/tailoring-progress.test.cjs`. Fixtures are isolated test data and never appear in the app.
+Run the response, diff, and authenticated-request regression tests with `node --test tests/tailoring-review.test.cjs tests/tailoring-progress.test.cjs tests/tailoring-jobs.test.cjs`. Fixtures are isolated test data and never appear in the app.
 
 Use Draftbit Publishing for native builds and web deployments.

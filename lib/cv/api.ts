@@ -1,5 +1,8 @@
 import {
   parseTailoringPreview,
+  parseTailoringJob,
+  parseRecentTailoringJobs,
+  type TailoringJob,
   parseTailoringProgress,
   type TailoringProgress,
   parseTailoringConfirmation,
@@ -289,17 +292,55 @@ async function tailoringRequest<T>(
   throw new CvApiError("Please sign in again.", 401);
 }
 
-export function previewTailoring(
+export function startTailoringJob(
   ownerId: string,
   input: TailoringInput,
-  signal: AbortSignal,
   progressId: string,
+  signal: AbortSignal,
+): Promise<TailoringJob> {
+  return tailoringRequest(
+    ownerId,
+    "/tailor/jobs",
+    signal,
+    parseTailoringJob,
+    "POST",
+    {
+      resume_id: input.resumeId,
+      job_description: input.jobDescription,
+      progress_id: progressId,
+    },
+    20000,
+  );
+}
+export function recentTailoringJobs(ownerId: string, signal: AbortSignal): Promise<TailoringJob[]> {
+  return tailoringRequest(
+    ownerId,
+    "/tailor/jobs/recent",
+    signal,
+    parseRecentTailoringJobs,
+    "GET",
+    undefined,
+    10000,
+  );
+}
+export function tailoringJobResult(
+  ownerId: string,
+  progressId: string,
+  signal: AbortSignal,
 ): Promise<TailoringPreview> {
-  return tailoringRequest(ownerId, "/tailor/preview", signal, parseTailoringPreview, "POST", {
-    resume_id: input.resumeId,
-    job_description: input.jobDescription,
-    progress_id: progressId,
-  });
+  return tailoringRequest(
+    ownerId,
+    "/tailor/jobs/" + encodeURIComponent(progressId) + "/result",
+    signal,
+    (value) => {
+      if (!isRecord(value) || value.progress_id !== progressId)
+        throw new Error("The tailoring service returned a different job result.");
+      return parseTailoringPreview(value);
+    },
+    "GET",
+    undefined,
+    15000,
+  );
 }
 export function loadTailoringReview(
   ownerId: string,

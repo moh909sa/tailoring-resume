@@ -66,6 +66,8 @@ export default function TailorScreen() {
     descriptionLength <= 12000 &&
     !authLoading &&
     !tailoring.hydrating &&
+    !tailoring.jobRecovering &&
+    !tailoring.jobConnectionError &&
     !authError;
   function startTailoring() {
     if (tailoring.status === "running") {
@@ -219,6 +221,19 @@ export default function TailorScreen() {
             )}
           </View>
           <View className="mt-8 gap-3">
+            {tailoring.jobConnectionError && tailoring.status !== "running" ? (
+              <View className="gap-3">
+                <Notice tone="info" message={tailoring.jobConnectionError} />
+                <Button
+                  variant="outline"
+                  onPress={tailoring.recoverJob}
+                  disabled={tailoring.jobRecovering}
+                  className="h-12 rounded-2xl"
+                >
+                  <Text>Check job status</Text>
+                </Button>
+              </View>
+            ) : null}
             {tailoring.tailoringId && !tailoring.saved && tailoring.status !== "running" ? (
               <Button
                 variant="outline"
