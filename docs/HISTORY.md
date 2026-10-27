@@ -6,4 +6,4 @@
 
 - Original CV deletion requires confirmation and is handled by Railway for every processing status; the app never deletes Storage files directly.
 
-- Tailoring generates a review-only Railway preview with no client limits; stage completion requires real backend information and never advances on a timer.
+- Tailoring uses a three-step review with explicit skill attestation and final confirmation; only the server supplies scores and changes, and original CVs remain unchanged.

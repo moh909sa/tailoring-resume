@@ -1,5 +1,5 @@
 import { useTailoring } from "@/lib/tailoring/TailoringProvider";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { router } from "expo-router";
 import {
   ActivityIndicator,
@@ -28,6 +28,7 @@ export default function TailorScreen() {
   const { theme } = useTheme();
   const cv = useMyCv();
   const tailoring = useTailoring();
+  const restoredInputOwner = useRef<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [choosing, setChoosing] = useState(false);
   const [mode, setMode] = useState<"description" | "url">("description");
@@ -45,6 +46,16 @@ export default function TailorScreen() {
     if (!cv.loading && !cv.listError && selectedId && !selected) setSelectedId(null);
   }, [cv.loading, cv.listError, selectedId, selected]);
 
+  useEffect(() => {
+    if (!ownerId || tailoring.hydrating || restoredInputOwner.current === ownerId) return;
+    restoredInputOwner.current = ownerId;
+    if (tailoring.input) {
+      setSelectedId(tailoring.input.resumeId);
+      setDescription(tailoring.input.jobDescription);
+      setMode("description");
+    }
+  }, [ownerId, tailoring.hydrating, tailoring.input]);
+
   const descriptionLength = description.trim().length;
   const canTailor =
     !!ownerId &&
@@ -54,6 +65,7 @@ export default function TailorScreen() {
     descriptionLength >= 50 &&
     descriptionLength <= 12000 &&
     !authLoading &&
+    !tailoring.hydrating &&
     !authError;
   function startTailoring() {
     if (tailoring.status === "running") {
@@ -207,6 +219,21 @@ export default function TailorScreen() {
             )}
           </View>
           <View className="mt-8 gap-3">
+            {tailoring.tailoringId && !tailoring.saved && tailoring.status !== "running" ? (
+              <Button
+                variant="outline"
+                onPress={() =>
+                  router.push({
+                    pathname: "/tailoring/review",
+                    params: { tailoringId: tailoring.tailoringId ?? "" },
+                  })
+                }
+                className="h-12 gap-2 rounded-2xl"
+              >
+                <LucideIcon name="FileCheck" size={18} className="text-primary" />
+                <Text>Continue your review</Text>
+              </Button>
+            ) : null}
             <Button
               disabled={!canTailor && tailoring.status !== "running"}
               onPress={startTailoring}

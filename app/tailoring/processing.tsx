@@ -28,7 +28,11 @@ export default function TailoringProcessingScreen() {
     };
   }, [running, run.startedAt]);
   useEffect(() => {
-    if (run.status === "success" && run.preview) router.replace("/tailoring/review");
+    if (run.status === "success" && run.preview)
+      router.replace({
+        pathname: "/tailoring/review",
+        params: { tailoringId: run.preview.tailoring_id },
+      });
   }, [run.status, run.preview]);
 
   function editInputs() {

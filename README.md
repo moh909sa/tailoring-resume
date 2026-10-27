@@ -50,10 +50,24 @@ Railway's `CORS_ORIGINS` must include the exact browser origins, preserving any 
 
 Tailor CV generates real previews from Ready originals and pasted job descriptions of 50–12,000 characters. Job URL input remains on the form, with guidance to paste the description for tailoring. No page limits, bullet limits, or intensity preferences are sent.
 
-`lib/tailoring/TailoringProvider.tsx` retains the input and full response in owner-scoped memory, prevents duplicate submissions, and aborts and clears data when accounts change. The synchronous request waits up to ten minutes. Errors stop the timer and preserve inputs for explicit Retry; no automatic retry follows a network failure.
+`lib/tailoring/TailoringProvider.tsx` retains the input and full response in owner-scoped memory, prevents duplicate operations, and aborts and clears data when accounts change. AsyncStorage keeps only the draft reference, last preview ID, form inputs, review step, and explicit keyword choices. Resume contents reload from the authenticated Railway review endpoint. The synchronous AI requests wait up to ten minutes. Errors preserve the current draft and inputs; mutations are never automatically retried.
 
 The full-screen processing route shows an animated document indicator, wall-clock elapsed time, and the seven Resume-Matcher stages. Since the mobile API exposes no live stages, all individual stages stay pending. The timeline accepts explicit running/completed/skipped statuses for a future backend adapter; no stages or percentages are inferred from time or success.
 
-Success opens a review with Resume, Analysis, and Changes tabs and any returned warnings. The entire response stays in application state, including optional ATS, keywords, writing feedback, and resume content. No confirmation endpoint is called and the original stays unchanged. Previews are not persisted on the device; reopening a review after app restart requires generating a new preview. Approval/saving and loading the Tailored CVs library are not connected.
+Success opens a three-step review wizard automatically. The Tailor screen links back to an unfinished review.
+
+1. **Optimize Keywords:** displays the backend ATS estimate and score history, supported and attestation-required suggestions, applied keywords, placements, warnings, and an expandable current resume. Users choose skills individually; “I have this” explicitly attests skills absent from the original. Every keyword request uses the latest `preview.preview_id`. The returned preview and review replace the current draft, enabling repeated applications within the backend limit of 30 keywords. Scores can rise, fall, or remain unchanged.
+2. **Review Changes:** shows the backend’s five summary counts, expandable section comparisons with word-level highlighting, and high risk warnings. The engine marks high risk diffs with `confidence: "high"`. Missing counts and comparisons remain unavailable and produce warnings; they are never inferred.
+3. **Confirm & Save:** displays the current score, total changes, unapplied selections, and safety warnings. An explicit tap checks the latest review before posting confirmation. If the preview changed, the user must review it again. Confirmation takes no body and saves a separate tailored CV, leaving the original unchanged. A concise saved acknowledgement ends the experience.
+
+Review endpoints use the existing Supabase bearer token:
+
+- `GET /api/v1/mobile/tailor/{tailoring_id}/review`
+- `POST /api/v1/mobile/tailor/{tailoring_id}/keywords` with `expected_preview_id` and `{keyword, attested}` entries
+- `POST /api/v1/mobile/tailor/{tailoring_id}/confirm` with no body
+
+409 conflicts and uncertain mutation outcomes reload the latest review without resubmitting. Validation errors preserve choices; expired previews require explicit regeneration with preserved inputs. Loading the Tailored CVs library, post-confirmation editing, and export are not connected.
+
+Run the response, diff, and authenticated-request regression tests with `node --test tests/tailoring-review.test.cjs`. Fixtures are isolated test data and never appear in the app.
 
 Use Draftbit Publishing for native builds and web deployments.

@@ -1,5 +1,8 @@
 import {
   parseTailoringPreview,
+  parseTailoringConfirmation,
+  type TailoringConfirmation,
+  type KeywordSelection,
   type TailoringInput,
   type TailoringPreview,
 } from "@/lib/tailoring/types";
@@ -223,28 +226,32 @@ export async function uploadResume(
   });
 }
 
-export async function previewTailoring(
+// All mobile tailoring requests share the existing owner-checked Supabase session.
+async function tailoringRequest<T>(
   ownerId: string,
-  input: TailoringInput,
+  path: string,
   signal: AbortSignal,
-): Promise<TailoringPreview> {
+  parse: (value: unknown) => T,
+  method: "GET" | "POST",
+  body?: unknown,
+): Promise<T> {
   for (let attempt = 0; attempt < 2; attempt++) {
     const token = await accessToken(ownerId, attempt === 1);
     if (signal.aborted) throw new Error("Tailoring canceled.");
     const controller = new AbortController();
     const abort = () => controller.abort();
     signal.addEventListener("abort", abort, { once: true });
-    // Full AI tailoring is synchronous and may take several minutes.
-    const timer = setTimeout(abort, 600000);
+    // AI keyword application, like initial tailoring, may take several minutes.
+    const timer = setTimeout(abort, method === "GET" ? 30000 : 600000);
     try {
-      const response = await fetch(endpoint("/tailor/preview"), {
-        method: "POST",
+      const response = await fetch(endpoint(path), {
+        method,
         headers: {
           Authorization: "Bearer " + token,
           Accept: "application/json",
-          "Content-Type": "application/json",
+          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         },
-        body: JSON.stringify({ resume_id: input.resumeId, job_description: input.jobDescription }),
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         signal: controller.signal,
       });
       if (response.status === 401 && attempt === 0) continue;
@@ -254,22 +261,22 @@ export async function previewTailoring(
           apiErrorMessage(
             response.status,
             payload,
-            "We couldn’t tailor this resume. Please try again.",
+            "We couldn’t complete this review request. Please try again.",
           ),
           response.status,
         );
-      return parseTailoringPreview(payload);
+      return parse(payload);
     } catch (error) {
       if (error instanceof CvApiError) throw error;
       if (signal.aborted) throw new Error("Tailoring canceled.");
       if (controller.signal.aborted)
         throw new Error(
-          "This request took too long. It may still be finishing. Wait a moment before trying again.",
+          "This request took too long. Reload the review to check whether it finished.",
         );
       if (error instanceof Error && error.message.startsWith("The tailoring service returned"))
         throw error;
       throw new Error(
-        "We couldn’t reach the tailoring service. Check your connection and try again.",
+        "We couldn’t reach the tailoring service. Check your connection and reload the review.",
       );
     } finally {
       clearTimeout(timer);
@@ -277,4 +284,78 @@ export async function previewTailoring(
     }
   }
   throw new CvApiError("Please sign in again.", 401);
+}
+
+export function previewTailoring(
+  ownerId: string,
+  input: TailoringInput,
+  signal: AbortSignal,
+): Promise<TailoringPreview> {
+  return tailoringRequest(ownerId, "/tailor/preview", signal, parseTailoringPreview, "POST", {
+    resume_id: input.resumeId,
+    job_description: input.jobDescription,
+  });
+}
+export function loadTailoringReview(
+  ownerId: string,
+  tailoringId: string,
+  signal: AbortSignal,
+): Promise<TailoringPreview> {
+  return tailoringRequest(
+    ownerId,
+    "/tailor/" + encodeURIComponent(tailoringId) + "/review",
+    signal,
+    (value) => {
+      const preview = parseTailoringPreview(value);
+      if (preview.tailoring_id !== tailoringId)
+        throw new Error("The tailoring service returned a different draft. Reload your review.");
+      return preview;
+    },
+    "GET",
+  );
+}
+export function applyTailoringKeywords(
+  ownerId: string,
+  tailoringId: string,
+  previewId: string,
+  keywords: KeywordSelection[],
+  signal: AbortSignal,
+): Promise<TailoringPreview> {
+  return tailoringRequest(
+    ownerId,
+    "/tailor/" + encodeURIComponent(tailoringId) + "/keywords",
+    signal,
+    (value) => {
+      const preview = parseTailoringPreview(value);
+      if (preview.tailoring_id !== tailoringId || preview.preview.preview_id === previewId)
+        throw new Error(
+          "The tailoring service returned an outdated keyword review. Reload your review before trying again.",
+        );
+      return preview;
+    },
+    "POST",
+    {
+      expected_preview_id: previewId,
+      keywords,
+    },
+  );
+}
+export function confirmTailoring(
+  ownerId: string,
+  tailoringId: string,
+  signal: AbortSignal,
+): Promise<TailoringConfirmation> {
+  // The mobile contract takes no body and atomically confirms its latest stored draft.
+  return tailoringRequest(
+    ownerId,
+    "/tailor/" + encodeURIComponent(tailoringId) + "/confirm",
+    signal,
+    (value) => {
+      const confirmation = parseTailoringConfirmation(value);
+      if (confirmation.tailoring_id !== tailoringId)
+        throw new Error("The tailoring service returned a different saved CV. Reload your review.");
+      return confirmation;
+    },
+    "POST",
+  );
 }
