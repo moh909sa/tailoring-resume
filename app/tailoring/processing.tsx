@@ -55,8 +55,8 @@ export default function TailoringProcessingScreen() {
             >
               Working on your resume
             </Text>
-            <Text className="text-body text-center leading-6 text-muted-foreground">
-              Our AI is tailoring your resume to match your next opportunity.
+            <Text className="text-caption text-center leading-5 text-muted-foreground">
+              This may take a few minutes.
             </Text>
           </View>
           {run.startedAt !== null ? (
@@ -159,13 +159,6 @@ export default function TailoringProcessingScreen() {
             <View className="rounded-2xl border border-border bg-card px-4 pb-1 pt-5">
               <StageTimeline progress={stageProgress(run.progress)} />
             </View>
-            <Text className="text-caption text-center leading-5 text-muted-foreground">
-              {running && run.startedAt !== null && now - run.startedAt >= 30000
-                ? "A thoughtful rewrite can take a few minutes. "
-                : ""}
-              Your preview will open automatically when it’s ready. Some stages may be skipped when
-              they aren’t needed.
-            </Text>
             <View className="flex-row items-center justify-center gap-2 pb-2">
               <LucideIcon name="ShieldCheck" size={14} className="text-muted-foreground" />
               <Text className="text-caption text-muted-foreground">
