@@ -4,7 +4,7 @@ import { useFocusEffect } from "expo-router";
 import * as DocumentPicker from "expo-document-picker";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { createCvFormData } from "@/lib/cv/file";
-import { listResumes, uploadResume } from "@/lib/cv/api";
+import { deleteResume, listResumes, uploadResume } from "@/lib/cv/api";
 import { CV_MIME_TYPES, type CvNotice, type Resume, type UploadProgress } from "@/lib/cv/types";
 
 type ListState = {
@@ -24,6 +24,9 @@ export function useMyCv() {
   const [notice, setNotice] = useState<CvNotice | null>(null);
   const [picking, setPicking] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const deleteRequest = useRef<AbortController | null>(null);
   const listRequest = useRef<AbortController | null>(null);
   const uploadRequest = useRef<AbortController | null>(null);
   const busy = useRef(false);
@@ -64,6 +67,9 @@ export function useMyCv() {
     setNotice(null);
     setUploadProgress(null);
     setPicking(false);
+    setDeletingId(null);
+    setDeleteError(null);
+    deleteRequest.current = null;
     setRefreshing(false);
     busy.current = false;
     const foreground = AppState.addEventListener("change", (state) => {
@@ -73,6 +79,7 @@ export function useMyCv() {
       owner.current = null;
       listRequest.current?.abort();
       uploadRequest.current?.abort();
+      deleteRequest.current?.abort();
       foreground.remove();
     };
   }, [ownerId, refresh]);
@@ -173,6 +180,48 @@ export function useMyCv() {
     }
   }, [ownerId, refresh]);
 
+  const remove = useCallback(
+    async (resumeId: string): Promise<boolean> => {
+      if (!ownerId || deleteRequest.current) return false;
+      const controller = new AbortController();
+      deleteRequest.current = controller;
+      setDeletingId(resumeId);
+      setDeleteError(null);
+      try {
+        await deleteResume(ownerId, resumeId, controller.signal);
+        if (controller.signal.aborted || owner.current !== ownerId) return false;
+        // Retain the confirmed deletion even if refreshing the list fails.
+        listRequest.current?.abort();
+        setList((previous) =>
+          previous.ownerId === ownerId
+            ? {
+                ...previous,
+                resumes: previous.resumes.filter((resume) => resume.id !== resumeId),
+              }
+            : previous,
+        );
+        setNotice({ tone: "success", message: "CV deleted successfully." });
+        await refresh();
+        return true;
+      } catch (error) {
+        if (!controller.signal.aborted && owner.current === ownerId) {
+          setDeleteError(
+            error instanceof Error
+              ? error.message
+              : "Your CV could not be deleted. Please try again.",
+          );
+        }
+        return false;
+      } finally {
+        if (deleteRequest.current === controller && owner.current === ownerId) {
+          deleteRequest.current = null;
+          setDeletingId(null);
+        }
+      }
+    },
+    [ownerId, refresh],
+  );
+
   return {
     resumes: visibleList.resumes,
     listError: visibleList.error,
@@ -184,5 +233,9 @@ export function useMyCv() {
     dismissNotice: () => setNotice(null),
     refresh,
     upload,
+    remove,
+    deletingId,
+    deleteError,
+    clearDeleteError: () => setDeleteError(null),
   };
 }

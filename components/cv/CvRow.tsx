@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { View } from "react-native";
 import { Text } from "@/components/ui/text";
 import LucideIcon from "@/lib/icons/LucideIcon";
@@ -10,7 +11,15 @@ function fileSize(bytes: number) {
     : Math.max(1, Math.round(bytes / 1024)) + " KB";
 }
 
-export function CvRow({ resume, selected = false }: { resume: Resume; selected?: boolean }) {
+export function CvRow({
+  resume,
+  selected = false,
+  actions,
+}: {
+  resume: Resume;
+  selected?: boolean;
+  actions?: ReactNode;
+}) {
   const failed = resume.processing_status === "failed" || resume.recovery_required;
   const ready = resume.processing_status === "ready" && !failed;
   const status = failed
@@ -61,6 +70,7 @@ export function CvRow({ resume, selected = false }: { resume: Resume; selected?:
         ) : null}
       </View>
       {selected ? <LucideIcon name="CircleCheck" size={21} className="text-primary" /> : null}
+      {actions}
     </View>
   );
 }

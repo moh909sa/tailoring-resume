@@ -1,3 +1,8 @@
+import {
+  parseTailoringPreview,
+  type TailoringInput,
+  type TailoringPreview,
+} from "@/lib/tailoring/types";
 import { supabase } from "@/lib/supabase";
 import {
   isRecord,
@@ -24,7 +29,11 @@ function endpoint(path: string): string {
   return API_URL + "/api/v1/mobile" + path;
 }
 
-export function apiErrorMessage(status: number, payload: unknown): string {
+export function apiErrorMessage(
+  status: number,
+  payload: unknown,
+  fallback = "The CV service could not accept this file. Please try again.",
+): string {
   if (status === 401) return "Your sign-in was not accepted. Sign out and sign in again.";
   if (status === 403) return "Your account cannot access this CV. Please contact support.";
   if (status === 413) return "This file is too large. Choose a CV of 4 MB or less.";
@@ -40,7 +49,7 @@ export function apiErrorMessage(status: number, payload: unknown): string {
   }
   return status >= 500
     ? "The CV service could not finish this request. Please try again."
-    : "The CV service could not accept this file. Please try again.";
+    : fallback;
 }
 
 function decodeResponse(text: string): unknown {
@@ -97,6 +106,52 @@ export async function listResumes(ownerId: string, signal: AbortSignal): Promise
       if (error instanceof Error && error.message.startsWith("The CV service returned"))
         throw error;
       throw new Error("Your CVs could not be loaded. Check your connection and try again.");
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+    }
+  }
+  throw new CvApiError("Please sign in again.", 401);
+}
+
+export async function deleteResume(
+  ownerId: string,
+  resumeId: string,
+  signal: AbortSignal,
+): Promise<void> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const token = await accessToken(ownerId, attempt === 1);
+    if (signal.aborted) throw new Error("Delete canceled.");
+    const timeout = new AbortController();
+    const abort = () => timeout.abort();
+    signal.addEventListener("abort", abort, { once: true });
+    const timer = setTimeout(abort, 30000);
+    try {
+      const response = await fetch(endpoint("/resumes/" + encodeURIComponent(resumeId)), {
+        method: "DELETE",
+        headers: { Authorization: "Bearer " + token, Accept: "application/json" },
+        signal: timeout.signal,
+      });
+      // A successful deletion has no response body.
+      if (response.status === 204) return;
+      if (response.status === 401 && attempt === 0) continue;
+      const payload: unknown = await response.json().catch(() => null);
+      throw new CvApiError(
+        response.ok
+          ? "The CV service did not confirm deletion. Refresh your CVs before trying again."
+          : apiErrorMessage(
+              response.status,
+              payload,
+              "Your CV could not be deleted. Please try again.",
+            ),
+        response.status,
+      );
+    } catch (error) {
+      if (error instanceof CvApiError) throw error;
+      if (signal.aborted) throw new Error("Delete canceled.");
+      if (timeout.signal.aborted)
+        throw new Error("Deleting your CV took too long. Refresh your CVs before trying again.");
+      throw new Error("Your CV could not be deleted. Check your connection and try again.");
     } finally {
       clearTimeout(timer);
       signal.removeEventListener("abort", abort);
@@ -166,4 +221,60 @@ export async function uploadResume(
       reject(error);
     }
   });
+}
+
+export async function previewTailoring(
+  ownerId: string,
+  input: TailoringInput,
+  signal: AbortSignal,
+): Promise<TailoringPreview> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const token = await accessToken(ownerId, attempt === 1);
+    if (signal.aborted) throw new Error("Tailoring canceled.");
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal.addEventListener("abort", abort, { once: true });
+    // Full AI tailoring is synchronous and may take several minutes.
+    const timer = setTimeout(abort, 600000);
+    try {
+      const response = await fetch(endpoint("/tailor/preview"), {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + token,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ resume_id: input.resumeId, job_description: input.jobDescription }),
+        signal: controller.signal,
+      });
+      if (response.status === 401 && attempt === 0) continue;
+      const payload: unknown = await response.json().catch(() => null);
+      if (!response.ok)
+        throw new CvApiError(
+          apiErrorMessage(
+            response.status,
+            payload,
+            "We couldn’t tailor this resume. Please try again.",
+          ),
+          response.status,
+        );
+      return parseTailoringPreview(payload);
+    } catch (error) {
+      if (error instanceof CvApiError) throw error;
+      if (signal.aborted) throw new Error("Tailoring canceled.");
+      if (controller.signal.aborted)
+        throw new Error(
+          "This request took too long. It may still be finishing. Wait a moment before trying again.",
+        );
+      if (error instanceof Error && error.message.startsWith("The tailoring service returned"))
+        throw error;
+      throw new Error(
+        "We couldn’t reach the tailoring service. Check your connection and try again.",
+      );
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+    }
+  }
+  throw new CvApiError("Please sign in again.", 401);
 }

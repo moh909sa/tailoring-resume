@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, View } from "react-native";
 import { AppScreen } from "@/components/layout/AppScreen";
 import { ScreenHeader } from "@/components/layout/ScreenHeader";
@@ -6,6 +6,17 @@ import { LibrarySections } from "@/components/library/LibrarySections";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { CvRow } from "@/components/cv/CvRow";
+import { CvActionsMenu } from "@/components/cv/CvActionsMenu";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import type { Resume } from "@/lib/cv/types";
 import { Notice } from "@/components/cv/Notice";
 import { DocumentEmptyState } from "@/components/cv/DocumentEmptyState";
 import { AccountSheet } from "@/components/cv/AccountSheet";
@@ -22,6 +33,8 @@ export default function MyCvsScreen() {
   const [showSignIn, setShowSignIn] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
+  const [resumeToDelete, setResumeToDelete] = useState<Resume | null>(null);
+  useEffect(() => setResumeToDelete(null), [session?.user?.id]);
   const signedIn = !!session?.user?.id;
   const busy = cv.picking || !!cv.uploadProgress;
 
@@ -33,8 +46,18 @@ export default function MyCvsScreen() {
     void cv.upload();
   }
 
+  function requestDelete(resume: Resume) {
+    cv.clearDeleteError();
+    setResumeToDelete(resume);
+  }
+
+  async function confirmDelete() {
+    if (!resumeToDelete || cv.deletingId) return;
+    if (await cv.remove(resumeToDelete.id)) setResumeToDelete(null);
+  }
+
   async function signOut() {
-    if (!supabase || signingOut || busy) return;
+    if (!supabase || signingOut || busy || cv.deletingId) return;
     setSigningOut(true);
     setSignOutError(null);
     try {
@@ -74,7 +97,19 @@ export default function MyCvsScreen() {
       <FlatList
         data={cv.resumes}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <CvRow resume={item} />}
+        renderItem={({ item }) => (
+          <CvRow
+            resume={item}
+            actions={
+              <CvActionsMenu
+                filename={item.original_filename}
+                disabled={!!cv.deletingId || signingOut}
+                deleting={cv.deletingId === item.id}
+                onDelete={() => requestDelete(item)}
+              />
+            }
+          />
+        )}
         contentContainerClassName="px-6 pb-8"
         showsVerticalScrollIndicator={false}
         refreshing={signedIn && cv.refreshing}
@@ -164,7 +199,7 @@ export default function MyCvsScreen() {
               </View>
               <Pressable
                 onPress={() => void signOut()}
-                disabled={busy || signingOut}
+                disabled={busy || signingOut || !!cv.deletingId}
                 accessibilityRole="button"
                 className="px-5 py-3"
               >
@@ -177,6 +212,39 @@ export default function MyCvsScreen() {
         }
       />
       <AccountSheet visible={showSignIn} onClose={() => setShowSignIn(false)} />
+      <AlertDialog
+        open={!!resumeToDelete && signedIn}
+        onOpenChange={(open) => {
+          if (!open && !cv.deletingId) setResumeToDelete(null);
+        }}
+      >
+        <AlertDialogContent className="w-full rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete CV?</AlertDialogTitle>
+            <AlertDialogDescription className="text-body leading-6">
+              {`Permanently delete “${resumeToDelete?.original_filename ?? "this CV"}” and its original file? This cannot be undone.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {cv.deleteError ? <Notice tone="error" message={cv.deleteError} /> : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={!!cv.deletingId} className="h-12 rounded-xl">
+              <Text>Cancel</Text>
+            </AlertDialogCancel>
+            <Button
+              variant="destructive"
+              disabled={!!cv.deletingId}
+              accessibilityState={{ busy: !!cv.deletingId }}
+              onPress={() => void confirmDelete()}
+              className="h-12 gap-2 rounded-xl"
+            >
+              {cv.deletingId ? (
+                <ActivityIndicator size="small" color={theme.colors.destructiveForeground} />
+              ) : null}
+              <Text>{cv.deletingId ? "Deleting…" : "Delete CV"}</Text>
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppScreen>
   );
 }

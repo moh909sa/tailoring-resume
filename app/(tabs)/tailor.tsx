@@ -1,3 +1,4 @@
+import { useTailoring } from "@/lib/tailoring/TailoringProvider";
 import { useEffect, useState } from "react";
 import { router } from "expo-router";
 import {
@@ -26,6 +27,7 @@ export default function TailorScreen() {
   const { session, loading: authLoading, error: authError } = useAuth();
   const { theme } = useTheme();
   const cv = useMyCv();
+  const tailoring = useTailoring();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [choosing, setChoosing] = useState(false);
   const [mode, setMode] = useState<"description" | "url">("description");
@@ -42,6 +44,32 @@ export default function TailorScreen() {
   useEffect(() => {
     if (!cv.loading && !cv.listError && selectedId && !selected) setSelectedId(null);
   }, [cv.loading, cv.listError, selectedId, selected]);
+
+  const descriptionLength = description.trim().length;
+  const canTailor =
+    !!ownerId &&
+    !!selected &&
+    selected.processing_status === "ready" &&
+    mode === "description" &&
+    descriptionLength >= 50 &&
+    descriptionLength <= 12000 &&
+    !authLoading &&
+    !authError;
+  function startTailoring() {
+    if (tailoring.status === "running") {
+      router.navigate("/tailoring/processing");
+      return;
+    }
+    if (!canTailor || !selected) return;
+    if (
+      tailoring.start({
+        resumeId: selected.id,
+        filename: selected.original_filename,
+        jobDescription: description.trim(),
+      })
+    )
+      router.push("/tailoring/processing");
+  }
 
   function goToMyCvs() {
     setChoosing(false);
@@ -180,15 +208,26 @@ export default function TailorScreen() {
           </View>
           <View className="mt-8 gap-3">
             <Button
-              disabled
-              accessibilityLabel="Tailor My CV. Coming soon."
+              disabled={!canTailor && tailoring.status !== "running"}
+              onPress={startTailoring}
+              accessibilityLabel={
+                tailoring.status === "running" ? "View tailoring progress" : "Tailor My CV"
+              }
               className="h-14 gap-2 rounded-2xl"
             >
               <LucideIcon name="Sparkles" size={19} className="text-primary-foreground" />
-              <Text>Tailor My CV</Text>
+              <Text>{tailoring.status === "running" ? "View progress" : "Tailor My CV"}</Text>
             </Button>
             <Text className="text-caption text-center leading-5 text-muted-foreground">
-              AI tailoring is coming soon.{"\n"}No tailored documents are created yet.
+              {mode === "url"
+                ? "To tailor your CV, switch to Job description and paste the text. Job links aren’t supported yet."
+                : selected && selected.processing_status !== "ready"
+                  ? "Choose a CV marked Ready before tailoring."
+                  : descriptionLength > 12000
+                    ? "Keep the job description to 12,000 characters or fewer."
+                    : descriptionLength < 50
+                      ? "Paste a job description of 50–12,000 characters. You’ll review the preview before anything is confirmed."
+                      : "You’ll review every change before anything is confirmed."}
             </Text>
           </View>
         </ScrollView>

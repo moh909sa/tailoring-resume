@@ -1,3 +1,4 @@
+import { TailoringProvider } from "@/lib/tailoring/TailoringProvider";
 import "@/global.css";
 import "@/appearance-polyfill";
 
@@ -130,6 +131,14 @@ function RootContent() {
           />
           <Stack.Screen name="(tabs)" options={{ title: "Home" }} />
           <Stack.Screen name="my-cv" options={{ title: "My CVs" }} />
+          <Stack.Screen
+            name="tailoring/processing"
+            options={{ title: "Tailoring your resume", animation: "fade", gestureEnabled: false }}
+          />
+          <Stack.Screen
+            name="tailoring/review"
+            options={{ title: "Review your resume", animation: "fade" }}
+          />
         </Stack>
         {
           // View used as a portal container on web
@@ -164,7 +173,9 @@ export default function RootLayout() {
       themes={[lightTheme, darkTheme]}
     >
       <AuthProvider>
-        <RootContent />
+        <TailoringProvider>
+          <RootContent />
+        </TailoringProvider>
       </AuthProvider>
     </ThemeProvider>
   );
