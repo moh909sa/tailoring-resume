@@ -1,3 +1,5 @@
+import { randomUUID } from "expo-crypto";
+import { pollTailoringProgress } from "@/lib/tailoring/progress";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   createContext,
@@ -14,6 +16,7 @@ import {
   confirmTailoring,
   CvApiError,
   loadTailoringReview,
+  getTailoringProgress,
   previewTailoring,
 } from "@/lib/cv/api";
 import { isRecord } from "@/lib/cv/types";
@@ -25,6 +28,7 @@ import {
   type TailoringConfirmation,
   type TailoringInput,
   type TailoringPreview,
+  type TailoringProgress,
 } from "@/lib/tailoring/types";
 
 type ReviewProblem = {
@@ -39,6 +43,8 @@ type RunState = {
   tailoringId: string | null;
   lastPreviewId: string | null;
   preview: TailoringPreview | null;
+  progressId: string | null;
+  progress: TailoringProgress | null;
   startedAt: number | null;
   finishedAt: number | null;
   error: string | null;
@@ -58,6 +64,8 @@ const emptyRun: RunState = {
   tailoringId: null,
   lastPreviewId: null,
   preview: null,
+  progressId: null,
+  progress: null,
   startedAt: null,
   finishedAt: null,
   error: null,
@@ -72,6 +80,7 @@ const emptyRun: RunState = {
 };
 type TailoringContextValue = RunState & {
   start: (input: TailoringInput) => boolean;
+  watchProgress: () => () => void;
   retry: () => void;
   reloadReview: (tailoringId?: string) => Promise<void>;
   applyKeywords: () => void;
@@ -153,6 +162,11 @@ export function TailoringProvider({ children }: { children: ReactNode }) {
   const owner = useRef(ownerId);
   owner.current = ownerId;
   const request = useRef<AbortController | null>(null);
+  const progressPolling = useRef<(() => void) | null>(null);
+  const stopProgressPolling = useCallback(() => {
+    progressPolling.current?.();
+    progressPolling.current = null;
+  }, []);
   const restoredOwner = useRef<string | null>(null);
   const writes = useRef<Promise<unknown>>(Promise.resolve());
   const [run, setRun] = useState<RunState>(emptyRun);
@@ -163,6 +177,7 @@ export function TailoringProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    stopProgressPolling();
     request.current?.abort();
     request.current = null;
     const previousOwner = restoredOwner.current;
@@ -194,9 +209,10 @@ export function TailoringProvider({ children }: { children: ReactNode }) {
     }
     return () => {
       active = false;
+      stopProgressPolling();
       request.current?.abort();
     };
-  }, [ownerId, update]);
+  }, [ownerId, update, stopProgressPolling]);
 
   useEffect(() => {
     if (
@@ -262,6 +278,39 @@ export function TailoringProvider({ children }: { children: ReactNode }) {
     [ownerId, update],
   );
 
+  const watchProgress = useCallback(() => {
+    const state = current.current;
+    const main = request.current;
+    if (
+      !ownerId ||
+      state.ownerId !== ownerId ||
+      state.status !== "running" ||
+      !state.progressId ||
+      !main
+    )
+      return () => {};
+    stopProgressPolling();
+    const progressId = state.progressId;
+    const stop = pollTailoringProgress(
+      (signal) => getTailoringProgress(ownerId, progressId, signal),
+      (progress) => {
+        if (
+          owner.current === ownerId &&
+          current.current.progressId === progressId &&
+          current.current.status === "running" &&
+          !main.signal.aborted
+        )
+          update((value) => ({ ...value, progress }));
+      },
+      main.signal,
+    );
+    progressPolling.current = stop;
+    return () => {
+      stop();
+      if (progressPolling.current === stop) progressPolling.current = null;
+    };
+  }, [ownerId, stopProgressPolling, update]);
+
   const start = useCallback(
     (input: TailoringInput): boolean => {
       if (
@@ -273,6 +322,21 @@ export function TailoringProvider({ children }: { children: ReactNode }) {
         return false;
       const controller = new AbortController();
       request.current = controller;
+      stopProgressPolling();
+      let progressId: string;
+      try {
+        progressId = randomUUID();
+      } catch {
+        request.current = null;
+        update(() => ({
+          ...emptyRun,
+          ownerId,
+          input,
+          status: "error",
+          error: "We couldn’t securely start tailoring. Please try again.",
+        }));
+        return true;
+      }
       const previous = current.current;
       const regenerating =
         previous.preview &&
@@ -283,6 +347,7 @@ export function TailoringProvider({ children }: { children: ReactNode }) {
         ...emptyRun,
         ownerId,
         status: "running",
+        progressId,
         input,
         startedAt: Date.now(),
         ...(regenerating
@@ -296,7 +361,7 @@ export function TailoringProvider({ children }: { children: ReactNode }) {
       }));
       void (async () => {
         try {
-          const preview = await previewTailoring(ownerId, input, controller.signal);
+          const preview = await previewTailoring(ownerId, input, controller.signal, progressId);
           if (!activeRequest(controller)) return;
           acceptPreview(preview);
           update((state) => ({ ...state, finishedAt: Date.now() }));
@@ -312,12 +377,15 @@ export function TailoringProvider({ children }: { children: ReactNode }) {
                   : "We couldn’t tailor your resume. Please try again.",
             }));
         } finally {
-          if (request.current === controller) request.current = null;
+          if (request.current === controller) {
+            stopProgressPolling();
+            request.current = null;
+          }
         }
       })();
       return true;
     },
-    [ownerId, activeRequest, acceptPreview, update],
+    [ownerId, activeRequest, acceptPreview, update, stopProgressPolling],
   );
 
   const reloadReview = useCallback(
@@ -592,6 +660,7 @@ export function TailoringProvider({ children }: { children: ReactNode }) {
       value={{
         ...visible,
         start,
+        watchProgress,
         retry: () => {
           if (visible.status === "error" && visible.input) start(visible.input);
         },

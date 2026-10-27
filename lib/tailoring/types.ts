@@ -244,3 +244,52 @@ export function elapsedLabel(start: number | null, end: number): string {
     String(Math.floor(seconds / 60)).padStart(2, "0") + ":" + String(seconds % 60).padStart(2, "0")
   );
 }
+
+// Keep the existing UI keys and labels; translate only the real engine IDs.
+export const PROGRESS_STAGE_KEYS = {
+  read_job: "keywords",
+  plan_skills: "plan",
+  tailor_resume: "tailor",
+  keywords_facts: "refine",
+  critique_writing: "critique",
+  rewrite_lines: "rewrite",
+  verify_review: "verify",
+} as const satisfies Record<string, StageKey>;
+export type TailoringProgress = {
+  status: "running" | "succeeded" | "failed";
+  current_step: string | null;
+  completed_steps: string[];
+  visited_steps: string[];
+  tailoring_id: string | null;
+};
+export function parseTailoringProgress(value: unknown): TailoringProgress {
+  if (
+    !isRecord(value) ||
+    !["running", "succeeded", "failed"].includes(String(value.status)) ||
+    (value.current_step != null && typeof value.current_step !== "string") ||
+    !Array.isArray(value.completed_steps) ||
+    !value.completed_steps.every((step) => typeof step === "string") ||
+    !Array.isArray(value.visited_steps) ||
+    !value.visited_steps.every((step) => typeof step === "string") ||
+    (value.tailoring_id != null && typeof value.tailoring_id !== "string")
+  )
+    throw new Error("The tailoring service returned incomplete progress.");
+  return {
+    status: value.status as TailoringProgress["status"],
+    current_step: typeof value.current_step === "string" ? value.current_step : null,
+    completed_steps: value.completed_steps,
+    visited_steps: value.visited_steps,
+    tailoring_id: typeof value.tailoring_id === "string" ? value.tailoring_id : null,
+  };
+}
+export function stageProgress(progress: TailoringProgress | null): StageProgress {
+  const stages: StageProgress = {};
+  if (!progress) return stages;
+  for (const [step, key] of Object.entries(PROGRESS_STAGE_KEYS)) {
+    if (progress.completed_steps.includes(step)) stages[key] = "completed";
+    else if (progress.status === "running" && progress.current_step === step)
+      stages[key] = "running";
+  }
+  // Visited is not completed. Unvisited and optional stages remain muted.
+  return stages;
+}

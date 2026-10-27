@@ -1,5 +1,7 @@
 import {
   parseTailoringPreview,
+  parseTailoringProgress,
+  type TailoringProgress,
   parseTailoringConfirmation,
   type TailoringConfirmation,
   type KeywordSelection,
@@ -234,6 +236,7 @@ async function tailoringRequest<T>(
   parse: (value: unknown) => T,
   method: "GET" | "POST",
   body?: unknown,
+  timeoutMs?: number,
 ): Promise<T> {
   for (let attempt = 0; attempt < 2; attempt++) {
     const token = await accessToken(ownerId, attempt === 1);
@@ -242,7 +245,7 @@ async function tailoringRequest<T>(
     const abort = () => controller.abort();
     signal.addEventListener("abort", abort, { once: true });
     // AI keyword application, like initial tailoring, may take several minutes.
-    const timer = setTimeout(abort, method === "GET" ? 30000 : 600000);
+    const timer = setTimeout(abort, timeoutMs ?? (method === "GET" ? 30000 : 600000));
     try {
       const response = await fetch(endpoint(path), {
         method,
@@ -290,10 +293,12 @@ export function previewTailoring(
   ownerId: string,
   input: TailoringInput,
   signal: AbortSignal,
+  progressId: string,
 ): Promise<TailoringPreview> {
   return tailoringRequest(ownerId, "/tailor/preview", signal, parseTailoringPreview, "POST", {
     resume_id: input.resumeId,
     job_description: input.jobDescription,
+    progress_id: progressId,
   });
 }
 export function loadTailoringReview(
@@ -357,5 +362,21 @@ export function confirmTailoring(
       return confirmation;
     },
     "POST",
+  );
+}
+
+export function getTailoringProgress(
+  ownerId: string,
+  progressId: string,
+  signal: AbortSignal,
+): Promise<TailoringProgress> {
+  return tailoringRequest(
+    ownerId,
+    "/tailor/progress/" + encodeURIComponent(progressId),
+    signal,
+    parseTailoringProgress,
+    "GET",
+    undefined,
+    8000,
   );
 }

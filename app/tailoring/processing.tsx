@@ -8,7 +8,7 @@ import { Notice } from "@/components/cv/Notice";
 import { ProcessingIndicator } from "@/components/tailoring/ProcessingIndicator";
 import { StageTimeline } from "@/components/tailoring/StageTimeline";
 import { useTailoring } from "@/lib/tailoring/TailoringProvider";
-import { elapsedLabel } from "@/lib/tailoring/types";
+import { elapsedLabel, stageProgress } from "@/lib/tailoring/types";
 import { useTheme } from "@/theming/ThemeProvider";
 import LucideIcon from "@/lib/icons/LucideIcon";
 
@@ -17,6 +17,10 @@ export default function TailoringProcessingScreen() {
   const { theme } = useTheme();
   const running = run.status === "running";
   const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!running) return;
+    return run.watchProgress();
+  }, [running, run.progressId, run.watchProgress]);
   useEffect(() => {
     if (!running) return;
     setNow(Date.now());
@@ -108,14 +112,14 @@ export default function TailoringProcessingScreen() {
               </Text>
             </View>
             <View className="rounded-2xl border border-border bg-card px-4 pb-1 pt-5">
-              <StageTimeline />
+              <StageTimeline progress={stageProgress(run.progress)} />
             </View>
             <Text className="text-caption text-center leading-5 text-muted-foreground">
               {running && run.startedAt !== null && now - run.startedAt >= 30000
                 ? "A thoughtful rewrite can take a few minutes. "
                 : ""}
-              Your preview will open automatically when it’s ready. Individual stage updates aren’t
-              available yet.
+              Your preview will open automatically when it’s ready. Some stages may be skipped when
+              they aren’t needed.
             </Text>
             <View className="flex-row items-center justify-center gap-2 pb-2">
               <LucideIcon name="ShieldCheck" size={14} className="text-muted-foreground" />

@@ -9,7 +9,7 @@ An Expo iOS, Android, and web app with Home, Tailor, and Library bottom tabs. Ho
 - Upload: `POST /api/v1/mobile/resumes/upload`, multipart field `file`
 - List: `GET /api/v1/mobile/resumes`, an array of CV metadata
 - Delete: `DELETE /api/v1/mobile/resumes/{id}`, HTTP 204 on success
-- Preview: `POST /api/v1/mobile/tailor/preview`, JSON `resume_id` and `job_description`; no length or intensity preferences
+- Preview: `POST /api/v1/mobile/tailor/preview`, JSON `resume_id`, `job_description`, and secure UUIDv4 `progress_id`; no length or intensity preferences
 - All requests use the current Supabase user access token as a bearer token. The app does not access Supabase Storage directly or create infrastructure; Railway owns file and record removal.
 
 ## Configuration
@@ -52,7 +52,11 @@ Tailor CV generates real previews from Ready originals and pasted job descriptio
 
 `lib/tailoring/TailoringProvider.tsx` retains the input and full response in owner-scoped memory, prevents duplicate operations, and aborts and clears data when accounts change. AsyncStorage keeps only the draft reference, last preview ID, form inputs, review step, and explicit keyword choices. Resume contents reload from the authenticated Railway review endpoint. The synchronous AI requests wait up to ten minutes. Errors preserve the current draft and inputs; mutations are never automatically retried.
 
-The full-screen processing route shows an animated document indicator, wall-clock elapsed time, and the seven Resume-Matcher stages. Since the mobile API exposes no live stages, all individual stages stay pending. The timeline accepts explicit running/completed/skipped statuses for a future backend adapter; no stages or percentages are inferred from time or success.
+The full-screen processing route preserves its animated document indicator, wall-clock elapsed time, and seven-stage layout. Each initial request gets a fresh cryptographically secure UUIDv4 from `expo-crypto`, sent as `progress_id` with the existing preview POST. While the screen is mounted and the POST runs, `lib/tailoring/progress.ts` polls `GET /api/v1/mobile/tailor/progress/{progress_id}` every 1.75 seconds with the current Supabase bearer token. GETs never overlap and time out independently after eight seconds.
+
+Engine IDs map to the existing labels: `read_job`, `plan_skills`, `tailor_resume`, `keywords_facts`, `critique_writing`, `rewrite_lines`, and `verify_review`. Checks come only from `completed_steps`; only the running `current_step` spins. `visited_steps` never implies completion, and optional/unvisited stages remain visible and muted. No timer advances stages.
+
+Initial registration 404s and temporary polling failures retry without changing the main POST, animation, timer, or inputs. Polling stops on terminal progress, POST success/error, cancellation, screen unmount, provider unmount, or account change. The successful preview POST remains authoritative: its full preview/review ends the elapsed timer and opens review automatically, even if the progress endpoint is unavailable. Progress success alone never navigates or invents a preview. Retry generates a fresh progress ID.
 
 Success opens a three-step review wizard automatically. The Tailor screen links back to an unfinished review.
 
@@ -68,6 +72,6 @@ Review endpoints use the existing Supabase bearer token:
 
 409 conflicts and uncertain mutation outcomes reload the latest review without resubmitting. Validation errors preserve choices; expired previews require explicit regeneration with preserved inputs. Loading the Tailored CVs library, post-confirmation editing, and export are not connected.
 
-Run the response, diff, and authenticated-request regression tests with `node --test tests/tailoring-review.test.cjs`. Fixtures are isolated test data and never appear in the app.
+Run the response, diff, and authenticated-request regression tests with `node --test tests/tailoring-review.test.cjs tests/tailoring-progress.test.cjs`. Fixtures are isolated test data and never appear in the app.
 
 Use Draftbit Publishing for native builds and web deployments.
