@@ -4,7 +4,16 @@ export function isGroundingWarning(message: string): boolean {
   return /^\s*GROUNDING_REVIEW_REQUIRED\s*:/i.test(message);
 }
 
+// Verification still runs on the backend; only its summary's display location changes.
+export function isRejectedChangeSummary(message: string): boolean {
+  return /^\s*\d+\s+change\(s\)\s+rejected during verification\s*$/i.test(message);
+}
+
 export function readableReviewWarning(message: string): string {
+  if (isRejectedChangeSummary(message)) {
+    const count = Number(message.match(/^\s*(\d+)/)?.[1] ?? 0);
+    return `${count} suggested ${count === 1 ? "change was" : "changes were"} excluded during verification. Check the updated text before saving.`;
+  }
   const detail = message.match(
     /^\s*GROUNDING_REVIEW_REQUIRED:\s*Review\s+workExperience\[(\d+)\]\.description\[(\d+)\]\s+against the source resume\.?\s*$/i,
   );
@@ -20,6 +29,8 @@ export function readableReviewWarning(message: string): string {
 // original backend warnings remain untouched in the draft.
 export function reviewWarningsForStep(warnings: string[], step: ReviewStep): string[] {
   return warnings
-    .filter((message) => step !== 0 || !isGroundingWarning(message))
+    .filter(
+      (message) => step !== 0 || (!isGroundingWarning(message) && !isRejectedChangeSummary(message)),
+    )
     .map(readableReviewWarning);
 }

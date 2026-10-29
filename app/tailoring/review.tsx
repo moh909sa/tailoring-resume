@@ -37,7 +37,7 @@ import LucideIcon from "@/lib/icons/LucideIcon";
 const stepCopy = [
   {
     title: "Optimize keywords",
-    body: "Bring the right skills forward. You choose what belongs in your resume.",
+    body: "Some job keywords are missing from your CV. Select skills you have to improve your match.",
   },
   {
     title: "Review changes",
@@ -210,7 +210,21 @@ export default function TailoringReviewScreen() {
     );
 
   const items: WizardItem[] = [];
-  const options = review.keyword_options;
+  // Deduplicate display options only. Keep backend data and attestation rules intact.
+  const seenKeywords = new Set<string>();
+  function uniqueKeywords(keywords: string[]) {
+    return keywords.filter((keyword) => {
+      const key = keywordKey(keyword);
+      if (seenKeywords.has(key)) return false;
+      seenKeywords.add(key);
+      return true;
+    });
+  }
+  const options = {
+    ...review.keyword_options,
+    supported: uniqueKeywords(review.keyword_options.supported),
+    needs_attestation: uniqueKeywords(review.keyword_options.needs_attestation),
+  };
   const selected = new Set(run.selectedKeywords.map((item) => keywordKey(item.keyword)));
   if (run.step === 0) {
     if (options.supported.length) {
@@ -229,7 +243,12 @@ export default function TailoringReviewScreen() {
         id: "attestation-heading",
         kind: "heading",
         title: "Skills to confirm",
-        body: "These weren’t found in your original CV. Select “I have this” only if you can back it up.",
+        body: "",
+      });
+      items.push({
+        id: "attestation-safety",
+        kind: "warning",
+        message: "Only select skills you really have. You may be asked about them in interviews.",
       });
       options.needs_attestation.forEach((keyword, index) =>
         items.push({ id: `attestation-${index}`, kind: "keyword", keyword, attestation: true }),
@@ -254,7 +273,7 @@ export default function TailoringReviewScreen() {
         id: "limit",
         kind: "warning",
         message:
-          "This draft has reached its 30-keyword limit. You can continue to review your changes.",
+          "No more skills can be added to this draft. Continue to Changes.",
       });
     if (review.keyword_placements.length) {
       items.push({
@@ -319,7 +338,9 @@ export default function TailoringReviewScreen() {
             <Text accessibilityRole="header" className="text-h5 text-foreground">
               {item.title}
             </Text>
-            <Text className="text-caption leading-5 text-muted-foreground">{item.body}</Text>
+            {item.body ? (
+              <Text className="text-body leading-6 text-muted-foreground">{item.body}</Text>
+            ) : null}
           </View>
         );
       case "keyword":
@@ -483,11 +504,6 @@ export default function TailoringReviewScreen() {
             {run.step === 0 ? (
               <>
                 <AtsScoreCard review={review} />
-                <SafetyNote message="Only select skills you really have. Expect questions about them in interviews." />
-                <Text className="text-caption text-muted-foreground">
-                  {options.remaining_slots} keywords can still be applied (30 total per draft).
-                  Select several, then apply them together. Scores may rise, fall, or stay the same.
-                </Text>
               </>
             ) : null}
             {run.step === 1 ? (
@@ -610,14 +626,6 @@ export default function TailoringReviewScreen() {
                 className="h-12 flex-1 rounded-xl"
               >
                 <Text>Continue to Changes</Text>
-              </Button>
-              <Button
-                variant="ghost"
-                onPress={() => setStep(1)}
-                disabled={busy}
-                className="h-12 rounded-xl px-3"
-              >
-                <Text className="text-muted-foreground">Skip</Text>
               </Button>
             </View>
           </>

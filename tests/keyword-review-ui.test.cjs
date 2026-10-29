@@ -123,7 +123,9 @@ function screenHarness() {
     { length: 35 },
     (_, i) => `Confirm ${i + 1}`,
   );
-  preview.review.warnings = [grounding];
+  preview.review.keyword_options.supported.push("EXISTING 1", "existing 40");
+  preview.review.keyword_options.needs_attestation.push("confirm 35", "EXISTING 1");
+  preview.review.warnings = [grounding, "2 change(s) rejected during verification"];
   const run = {
     preview,
     step: 0,
@@ -186,7 +188,16 @@ test("all 75 returned suggestions share one list; selections persist and Continu
   const keywords = list.props.data.filter((item) => item.kind === "keyword");
   assert.equal(keywords.length, 75, "30 is an application limit, never a list page size");
   assert.equal(keywords.at(-1).keyword, "Confirm 35");
-  assert.ok(!list.props.data.some((item) => item.kind === "warning"));
+  const safety = list.props.data.filter((item) => item.kind === "warning");
+  assert.equal(safety.length, 1);
+  assert.match(safety[0].message, /Only select skills you really have/);
+  assert.equal(list.props.data.find((item) => item.id === "attestation-heading").body, "");
+  assert.equal(new Set(keywords.map((item) => item.keyword.toLowerCase())).size, 75);
+  assert.equal(run.preview.review.keyword_options.supported.length, 42, "display deduplication never alters server options");
+  assert.ok(!nodes(screen).some((node) => node.type === "Button" && text(node) === "Skip"));
+  const header = text(list.props.ListHeaderComponent);
+  assert.doesNotMatch(header, /30 total|keywords can still|Only select skills/);
+  assert.match(header, /Some job keywords are missing from your CV/);
   for (const name of ["Existing 1", "Confirm 35", "Confirm 2", "Confirm 35", "Confirm 35"]) {
     list = nodes(render()).find((node) => node.type === "FlatList");
     const item = list.props.data.find((item) => item.kind === "keyword" && item.keyword === name);
@@ -213,4 +224,24 @@ test("all 75 returned suggestions share one list; selections persist and Continu
     ),
   );
   assert.equal(run.selectedKeywords.length, 3);
+  assert.ok(list.props.data.some((item) => item.kind === "warning" && /2 suggested changes were excluded/.test(item.message)));
+});
+
+
+test("verification rejection summaries use friendly copy outside Keywords without hiding other warnings", () => {
+  for (const count of [1, 7]) {
+    const summary = `${count} change(s) rejected during verification`;
+    const messages = [summary, "Please check your qualifications."];
+    assert.deepEqual(warnings.reviewWarningsForStep(messages, 0), [messages[1]]);
+    for (const step of [1, 2]) {
+      assert.equal(
+        warnings.reviewWarningsForStep(messages, step)[0],
+        `${count} suggested ${count === 1 ? "change was" : "changes were"} excluded during verification. Check the updated text before saving.`,
+      );
+    }
+    assert.equal(messages[0], summary);
+    assert.equal(warnings.isRejectedChangeSummary(`  ${count} CHANGE(S) REJECTED DURING VERIFICATION  `), true);
+  }
+  const other = "Verification failed. Reload before continuing.";
+  assert.deepEqual(warnings.reviewWarningsForStep([other], 0), [other]);
 });
