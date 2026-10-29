@@ -77,7 +77,7 @@ export function AtsScoreCard({ review }: { review: TailoringReview }) {
             <LucideIcon name="ChartNoAxesCombined" size={16} className="text-primary" />
             <Text className="text-h6 text-foreground">ATS match score</Text>
           </View>
-          <Text className="text-caption leading-5 text-muted-foreground">
+          <Text className="text-body leading-6 text-muted-foreground">
             Estimated for this job description.
           </Text>
         </View>
@@ -357,10 +357,10 @@ export function KeywordOption({
       className="min-h-16 flex-row items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3.5"
       style={rowStyle}
     >
-      <Text className="text-h6 flex-1 leading-5 text-foreground">{keyword}</Text>
+      <Text className="text-h5 flex-1 leading-6 text-foreground">{keyword}</Text>
       {attestation ? (
         <Text
-          className="text-caption text-muted-foreground"
+          className="text-body text-muted-foreground"
           style={{ color: selected ? theme.colors.primary : theme.colors.mutedForeground }}
         >
           I have this
