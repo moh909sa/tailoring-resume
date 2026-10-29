@@ -20,6 +20,7 @@ import {
   SectionToggle,
   sectionTitle,
 } from "@/components/tailoring/ReviewPrimitives";
+import { cn } from "@/lib/utils";
 import { useTailoring } from "@/lib/tailoring/TailoringProvider";
 import {
   atsScore,
@@ -45,7 +46,7 @@ const stepCopy = [
   },
   { title: "Confirm & save", body: "One final check before saving your tailored CV." },
 ];
-type WizardItem =
+type WizardItem = { connected?: string } & (
   | { id: string; kind: "heading"; title: string; body: string }
   | { id: string; kind: "keyword"; keyword: string; attestation: boolean }
   | {
@@ -61,10 +62,13 @@ type WizardItem =
       kind: "change";
       change: ResumeChange;
       summaryComparison?: boolean;
+      descriptionComparison?: boolean;
     }
   | { id: string; kind: "resume"; item: ReviewItem }
   | { id: string; kind: "placement"; placement: KeywordPlacement }
-  | { id: string; kind: "warning"; message: string };
+  | { id: string; kind: "warning"; message: string }
+  | { id: string; kind: "skill-added"; change: ResumeChange }
+);
 
 export default function TailoringReviewScreen() {
   const run = useTailoring();
@@ -291,7 +295,8 @@ export default function TailoringReviewScreen() {
     // Step 2 retains every warning. Attach exact backend paths to their
     // comparison; warnings without a matching comparison stay visible here.
     const rawWarning = review.warnings[index];
-    const referencedPaths: string[] = rawWarning?.match(/[A-Za-z_]\w*(?:\[\d+\]|\.[A-Za-z_]\w*)+/g) ?? [];
+    const referencedPaths: string[] =
+      rawWarning?.match(/[A-Za-z_]\w*(?:\[\d+\]|\.[A-Za-z_]\w*)+/g) ?? [];
     const relatedChange =
       run.step === 1
         ? review.change_sections
@@ -325,6 +330,11 @@ export default function TailoringReviewScreen() {
   if (run.step === 1) {
     review.change_sections.forEach((section, index) => {
       const highRisk = section.items.some((change) => change.confidence === "high");
+      const connected = ["summary", "skill", "description"].includes(section.type)
+        ? section.type
+        : undefined;
+      const hasAddedSkills =
+        section.type === "skill" && section.items.some((change) => change.change_type === "added");
       items.push({
         id: `section-${index}`,
         kind: "section",
@@ -336,25 +346,39 @@ export default function TailoringReviewScreen() {
               description: "Description Changes",
             } as Record<string, string>
           )[section.type] ?? sectionTitle(section.type),
-        subtitle: `${section.items.length} change${section.items.length === 1 ? "" : "s"}${highRisk ? " · Contains high risk changes" : ""}`,
+        subtitle: `${section.items.length} change${section.items.length === 1 ? "" : "s"}${hasAddedSkills ? " · Review skill accuracy in Save" : highRisk ? " · Contains high risk changes" : ""}`,
         section: section.type,
-        highRisk,
+        highRisk: section.type === "skill" ? false : highRisk,
+        connected,
       });
       if (expanded.has(section.type))
         section.items.forEach((change, changeIndex) => {
-          items.push({
-            id: `change-${index}-${changeIndex}`,
-            kind: "change",
-            change,
-            summaryComparison: section.type === "summary",
-          });
-          warningsByChange
-            .get(change)
-            ?.forEach((message, warningIndex) =>
+          const addedSkill = section.type === "skill" && change.change_type === "added";
+          if (addedSkill) {
+            items.push({
+              id: `change-${index}-${changeIndex}`,
+              kind: "skill-added",
+              change,
+              connected,
+            });
+          } else {
+            items.push({
+              id: `change-${index}-${changeIndex}`,
+              kind: "change",
+              change,
+              summaryComparison: section.type === "summary",
+              descriptionComparison: section.type === "description",
+              connected,
+            });
+          }
+          // Added-skill warnings are presented in Save with the full preview.
+          if (!addedSkill)
+            warningsByChange.get(change)?.forEach((message, warningIndex) =>
               items.push({
                 id: `change-warning-${index}-${changeIndex}-${warningIndex}`,
                 kind: "warning",
                 message,
+                connected,
               }),
             );
         });
@@ -369,11 +393,35 @@ export default function TailoringReviewScreen() {
             : "Detailed comparisons are unavailable. Reload the review, then check the full resume before saving.",
       });
   }
-  if (run.step !== 0) {
+  if (run.step === 2) {
+    const skillChecks = review.change_sections.flatMap((section) =>
+      section.type === "skill"
+        ? section.items.filter(
+            (change) => change.change_type === "added" && change.confidence === "high",
+          )
+        : [],
+    );
+    if (skillChecks.length) {
+      items.push({
+        id: "skill-verification-heading",
+        kind: "heading",
+        title: "Skills to verify before saving",
+        body: "These added skills still require verification. Confirm that each claim is accurate and supported by your experience.",
+      });
+      skillChecks.forEach((change, index) =>
+        items.push({
+          id: `skill-verification-${index}`,
+          kind: "warning",
+          message: change.new_value
+            ? `Verify this added skill against your original CV and experience: ${change.new_value}`
+            : "An added skill requires verification, but its details are unavailable. Reload the review before saving.",
+        }),
+      );
+    }
     items.push({
       id: "resume-toggle",
       kind: "section",
-      title: "Preview current resume",
+      title: "Preview updated CV",
       subtitle: "Read the complete draft",
       section: "resume",
     });
@@ -418,6 +466,7 @@ export default function TailoringReviewScreen() {
             open={expanded.has(item.section)}
             onPress={() => toggle(item.section)}
             highRisk={item.highRisk}
+            embedded={!!item.connected}
             icon={
               item.section === "placements"
                 ? "MapPin"
@@ -428,7 +477,28 @@ export default function TailoringReviewScreen() {
           />
         );
       case "change":
-        return <ChangeComparison change={item.change} summaryComparison={item.summaryComparison} />;
+        return (
+          <ChangeComparison
+            change={item.change}
+            summaryComparison={item.summaryComparison}
+            descriptionComparison={item.descriptionComparison}
+            embedded={!!item.connected}
+          />
+        );
+      case "skill-added":
+        return (
+          <View className="px-4 py-2.5">
+            {item.change.new_value ? (
+              <Text selectable className="text-body leading-6 text-success">
+                {item.change.new_value}
+              </Text>
+            ) : (
+              <Text className="text-caption leading-5 text-muted-foreground">
+                Added skill details are unavailable.
+              </Text>
+            )}
+          </View>
+        );
       case "resume":
         return <ReviewContent item={item.item} />;
       case "placement":
@@ -445,6 +515,22 @@ export default function TailoringReviewScreen() {
       case "warning":
         return <SafetyNote message={item.message} />;
     }
+  }
+  function renderRow(item: WizardItem, index = items.indexOf(item)) {
+    if (!item.connected) return <View className="mb-3">{renderItem(item)}</View>;
+    const header = item.kind === "section";
+    const last = items[index + 1]?.connected !== item.connected;
+    return (
+      <View
+        className={cn(
+          "overflow-hidden border-x border-border bg-card",
+          header ? "rounded-t-2xl border-t" : "border-t",
+          last && "mb-3 rounded-b-2xl border-b",
+        )}
+      >
+        {renderItem(item)}
+      </View>
+    );
   }
   const score = atsScore(review);
   const activityLabel =
@@ -491,7 +577,7 @@ export default function TailoringReviewScreen() {
         data={items}
         extraData={run.selectedKeywords}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <View className="mb-3">{renderItem(item)}</View>}
+        renderItem={({ item, index }) => renderRow(item, index)}
         showsVerticalScrollIndicator={false}
         contentContainerClassName="px-6 pb-5"
         keyboardShouldPersistTaps="handled"

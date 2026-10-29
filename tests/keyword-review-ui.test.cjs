@@ -330,7 +330,9 @@ test("simplified Changes preserves individual risks, dynamic counts and unmatche
   }
   list = nodes(render()).find((node) => node.type === "FlatList");
   assert.deepEqual(
-    list.props.data.filter((item) => item.kind === "change").map((item) => item.change),
+    list.props.data
+      .filter((item) => item.kind === "change" || item.kind === "skill-added")
+      .map((item) => item.change),
     run.preview.review.change_sections.flatMap((section) => section.items),
   );
   assert.ok(
@@ -338,7 +340,15 @@ test("simplified Changes preserves individual risks, dynamic counts and unmatche
       (item) => item.kind === "warning" && /bullet 2 in work experience 1/.test(item.message),
     ),
   );
-  assert.ok(list.props.data.some((item) => item.id === "resume-toggle"));
+  assert.ok(!list.props.data.some((item) => item.id === "resume-toggle"));
+  run.step = 2;
+  let saveList = nodes(render()).find((node) => node.type === "FlatList");
+  assert.equal(
+    saveList.props.data.find((item) => item.id === "resume-toggle").title,
+    "Preview updated CV",
+  );
+  assert.ok(saveList.props.data.some((item) => item.id === "skill-verification-heading"));
+  run.step = 1;
   // A warning with an exact comparison path belongs beside that comparison.
   const target = run.preview.review.change_sections.find(
     (section) => section.type === "description",
@@ -401,6 +411,103 @@ test("Summary comparisons preserve complete paragraphs with full Before striketh
     nodes(otherBefore).some(
       (node) =>
         node !== otherBefore && node.props.className === "" && text(node).includes("Maintained"),
+    ),
+  );
+});
+
+test("connected accordions have no inter-row gaps and skill additions remain compact with checks in Save", () => {
+  const { run, render } = screenHarness();
+  run.step = 1;
+  let list = nodes(render()).find((node) => node.type === "FlatList");
+  for (const type of ["skill", "description"]) {
+    list.props
+      .renderItem({ item: list.props.data.find((item) => item.section === type) })
+      .props.children.props.onPress();
+    list = nodes(render()).find((node) => node.type === "FlatList");
+  }
+  for (const type of ["summary", "skill", "description"]) {
+    const group = list.props.data.filter((item) => item.connected === type);
+    assert.ok(group.length > 1);
+    const firstIndex = list.props.data.indexOf(group[0]);
+    assert.deepEqual(list.props.data.slice(firstIndex, firstIndex + group.length), group);
+    for (let index = 0; index < group.length; index++) {
+      const row = list.props.renderItem({ item: group[index] });
+      assert.ok(row.props.className.includes("border-x"));
+      assert.equal(row.props.className.includes("mb-3"), index === group.length - 1);
+      if (index === 0) {
+        assert.ok(row.props.className.includes("rounded-t-2xl"));
+        assert.equal(row.props.children.props.embedded, true);
+      }
+      if (index === group.length - 1) assert.ok(row.props.className.includes("rounded-b-2xl"));
+    }
+  }
+  const skill = list.props.data.find((item) => item.kind === "skill-added");
+  const skillContent = list.props.renderItem({ item: skill }).props.children;
+  assert.equal(text(skillContent), skill.change.new_value);
+  assert.ok(nodes(skillContent).some((node) => node.props.className?.includes("text-success")));
+  assert.doesNotMatch(text(skillContent), /Before|After|High risk|Verify this claim/);
+  assert.ok(
+    list.props.data.some((item) => item.kind === "change" && item.change.change_type === "removed"),
+  );
+  run.preview.review.warnings.push("Check additional.technicalSkills against your original CV.");
+  list = nodes(render()).find((node) => node.type === "FlatList");
+  assert.ok(!list.props.data.some((item) => item.message === run.preview.review.warnings.at(-1)));
+  // Closing a section leaves a single fully rounded header.
+  list.props
+    .renderItem({ item: list.props.data.find((item) => item.section === "skill") })
+    .props.children.props.onPress();
+  list = nodes(render()).find((node) => node.type === "FlatList");
+  assert.equal(list.props.data.filter((item) => item.connected === "skill").length, 1);
+  run.step = 2;
+  const saveList = nodes(render()).find((node) => node.type === "FlatList");
+  assert.ok(
+    saveList.props.data.some((item) => item.message === run.preview.review.warnings.at(-1)),
+  );
+  assert.ok(
+    saveList.props.data.some(
+      (item) => item.id === "skill-verification-0" && item.message.includes(skill.change.new_value),
+    ),
+  );
+  assert.equal(
+    saveList.props.data.find((item) => item.id === "resume-toggle").title,
+    "Preview updated CV",
+  );
+});
+
+test("descriptions share Summary replacement treatment without altering backend paragraphs", () => {
+  const original = "Built devices.\n\n" + "Kept production reliable. ".repeat(30);
+  const updated = "Built automation.\n\n" + "Kept production reliable. ".repeat(30);
+  const change = {
+    field_type: "description",
+    field_path: "workExperience[0].description[0]",
+    change_type: "modified",
+    confidence: "medium",
+    original_value: original,
+    new_value: updated,
+  };
+  const comparison = primitives.ChangeComparison({
+    change,
+    descriptionComparison: true,
+    embedded: true,
+  });
+  assert.ok(!comparison.props.className.includes("rounded-2xl"));
+  const texts = nodes(comparison).filter((node) => node.type === "Text" && node.props.selectable);
+  assert.equal(text(texts[0]), original);
+  assert.equal(text(texts[1]), updated);
+  assert.ok(
+    nodes(texts[0])
+      .filter((node) => node !== texts[0])
+      .every((node) => node.props.className.includes("line-through")),
+  );
+  assert.ok(
+    nodes(texts[0]).some(
+      (node) =>
+        text(node).includes("devices") && node.props.className?.includes("text-destructive"),
+    ),
+  );
+  assert.ok(
+    nodes(texts[1]).some(
+      (node) => text(node).includes("automation") && node.props.className?.includes("text-primary"),
     ),
   );
 });

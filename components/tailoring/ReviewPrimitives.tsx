@@ -251,6 +251,7 @@ export function SectionToggle({
   icon = "FileText",
   highRisk = false,
   count,
+  embedded = false,
 }: {
   title: string;
   subtitle?: string;
@@ -259,6 +260,7 @@ export function SectionToggle({
   icon?: IconName;
   highRisk?: boolean;
   count?: number;
+  embedded?: boolean;
 }) {
   return (
     <Pressable
@@ -268,8 +270,9 @@ export function SectionToggle({
       accessibilityState={{ expanded: open }}
       aria-expanded={open}
       className={cn(
-        "min-h-16 flex-row items-center gap-3 rounded-2xl border border-border bg-card px-4 py-4 active:bg-secondary",
-        highRisk && "border-destructive/25",
+        "min-h-16 flex-row items-center gap-3 bg-card px-4 py-4 active:bg-secondary",
+        !embedded && "rounded-2xl border border-border",
+        highRisk && !embedded && "border-destructive/25",
       )}
     >
       <LucideIcon
@@ -349,10 +352,14 @@ export function KeywordOption({
 export function ChangeComparison({
   change,
   summaryComparison = false,
+  descriptionComparison = false,
+  embedded = false,
   verification = false,
 }: {
   change: ResumeChange;
   summaryComparison?: boolean;
+  descriptionComparison?: boolean;
+  embedded?: boolean;
   verification?: boolean;
 }) {
   const diff = useMemo(
@@ -360,9 +367,10 @@ export function ChangeComparison({
     [change.original_value, change.new_value],
   );
   const highRisk = change.confidence === "high";
-  const calmVerification = verification || summaryComparison;
+  const fullComparison = summaryComparison || descriptionComparison;
+  const calmVerification = verification || fullComparison;
   const summaryReplaced =
-    summaryComparison &&
+    fullComparison &&
     change.change_type === "modified" &&
     !!change.original_value &&
     !!change.new_value &&
@@ -370,8 +378,9 @@ export function ChangeComparison({
   return (
     <View
       className={cn(
-        "gap-4 rounded-2xl border border-border bg-card p-4",
-        highRisk && (calmVerification ? "border-primary/25" : "border-destructive/30"),
+        "gap-4 bg-card p-4",
+        !embedded && "rounded-2xl border border-border",
+        highRisk && !embedded && (calmVerification ? "border-primary/25" : "border-destructive/30"),
       )}
     >
       <View className="flex-row flex-wrap items-center justify-between gap-2">
@@ -436,7 +445,7 @@ export function ChangeComparison({
                 key={i}
                 className={
                   part.changed
-                    ? change.change_type === "added" && !summaryComparison
+                    ? change.change_type === "added" && !fullComparison
                       ? "bg-success/10 text-success"
                       : "bg-primary/10 text-primary"
                     : ""

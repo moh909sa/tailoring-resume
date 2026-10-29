@@ -17,3 +17,5 @@
 - Review Changes emphasizes primary metrics and a calm expandable verification section, with complete struck-through original summaries beside word-level highlights.
 
 - Review Changes keeps verification warnings with their individual comparisons and shows unmatched safety issues without a separate verification accordion.
+
+- Review Changes uses connected accordions, compact added skills, and full description comparisons; Save holds the updated CV preview and outstanding added-skill checks.
