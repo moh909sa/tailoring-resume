@@ -68,6 +68,7 @@ function text(element) {
 }
 const theme = { colors: { primary: "purple", border: "gray", mutedForeground: "silver" } };
 const primitivesMocks = {
+  react: { ...React, useMemo: (fn) => fn() },
   "react-native": { Pressable: "Pressable", View: "View" },
   "@/components/ui/text": { Text: "Text" },
   "@/lib/icons/LucideIcon": { __esModule: true, default: "Icon" },
@@ -142,6 +143,8 @@ function screenHarness() {
       else run.selectedKeywords = [...run.selectedKeywords, { keyword, attested }];
     },
   };
+  const stateValues = [];
+  let stateIndex = 0;
   const mocks = {
     ...primitivesMocks,
     react: {
@@ -149,7 +152,17 @@ function screenHarness() {
       useCallback: (fn) => fn,
       useEffect: () => {},
       useRef: () => ({ current: null }),
-      useState: (init) => [typeof init === "function" ? init() : init, () => {}],
+      useState: (init) => {
+        const index = stateIndex++;
+        if (!(index in stateValues))
+          stateValues[index] = typeof init === "function" ? init() : init;
+        return [
+          stateValues[index],
+          (value) => {
+            stateValues[index] = typeof value === "function" ? value(stateValues[index]) : value;
+          },
+        ];
+      },
     },
     "expo-router": {
       router: {},
@@ -179,7 +192,13 @@ function screenHarness() {
     "@/lib/tailoring/TailoringProvider": { useTailoring: () => run },
   };
   const Screen = loadSource("app/tailoring/review.tsx", mocks).default;
-  return { run, render: () => Screen() };
+  return {
+    run,
+    render: () => {
+      stateIndex = 0;
+      return Screen();
+    },
+  };
 }
 test("all 75 returned suggestions share one list; selections persist and Continue opens Changes", () => {
   const { run, render } = screenHarness();
@@ -193,7 +212,11 @@ test("all 75 returned suggestions share one list; selections persist and Continu
   assert.match(safety[0].message, /Only select skills you really have/);
   assert.equal(list.props.data.find((item) => item.id === "attestation-heading").body, "");
   assert.equal(new Set(keywords.map((item) => item.keyword.toLowerCase())).size, 75);
-  assert.equal(run.preview.review.keyword_options.supported.length, 42, "display deduplication never alters server options");
+  assert.equal(
+    run.preview.review.keyword_options.supported.length,
+    42,
+    "display deduplication never alters server options",
+  );
   assert.ok(!nodes(screen).some((node) => node.type === "Button" && text(node) === "Skip"));
   const header = text(list.props.ListHeaderComponent);
   assert.doesNotMatch(header, /30 total|keywords can still|Only select skills/);
@@ -224,9 +247,12 @@ test("all 75 returned suggestions share one list; selections persist and Continu
     ),
   );
   assert.equal(run.selectedKeywords.length, 3);
-  assert.ok(list.props.data.some((item) => item.kind === "warning" && /2 suggested changes were excluded/.test(item.message)));
+  assert.ok(
+    list.props.data.some(
+      (item) => item.kind === "warning" && /2 suggested changes were excluded/.test(item.message),
+    ),
+  );
 });
-
 
 test("verification rejection summaries use friendly copy outside Keywords without hiding other warnings", () => {
   for (const count of [1, 7]) {
@@ -240,8 +266,130 @@ test("verification rejection summaries use friendly copy outside Keywords withou
       );
     }
     assert.equal(messages[0], summary);
-    assert.equal(warnings.isRejectedChangeSummary(`  ${count} CHANGE(S) REJECTED DURING VERIFICATION  `), true);
+    assert.equal(
+      warnings.isRejectedChangeSummary(`  ${count} CHANGE(S) REJECTED DURING VERIFICATION  `),
+      true,
+    );
   }
   const other = "Verification failed. Reload before continuing.";
   assert.deepEqual(warnings.reviewWarningsForStep([other], 0), [other]);
+});
+
+test("summary cards keep primary metrics and only positive optional counts", () => {
+  const summary = {
+    skills_added: 0,
+    descriptions_modified: 0,
+    skills_removed: 0,
+    certifications_added: 0,
+    high_risk_changes: 6,
+  };
+  let cards = primitives.ChangeSummaryCards({ summary });
+  assert.match(text(cards), /Skills Added/);
+  assert.match(text(cards), /Descriptions Modified/);
+  assert.doesNotMatch(text(cards), /Skills Removed|Certifications Added|High Risk Changes/);
+  summary.skills_removed = 2;
+  summary.certifications_added = 3;
+  cards = primitives.ChangeSummaryCards({ summary });
+  assert.match(text(cards), /2Skills Removed/);
+  assert.match(text(cards), /3Certifications Added/);
+  assert.equal(nodes(cards).filter((node) => node.props.className?.includes("w-[48%]")).length, 4);
+  summary.skills_removed = null;
+  summary.certifications_added = null;
+  assert.doesNotMatch(
+    text(primitives.ChangeSummaryCards({ summary })),
+    /Skills Removed|Certifications Added/,
+  );
+});
+
+test("verification accordion uses backend classification and preserves separate safety issues", () => {
+  const { run, render } = screenHarness();
+  run.step = 1;
+  let list = nodes(render()).find((node) => node.type === "FlatList");
+  const verification = list.props.data.find((item) => item.id === "verification-toggle");
+  assert.equal(verification.title, "Changes to Verify");
+  assert.equal(verification.count, run.preview.review.change_summary.high_risk_changes);
+  assert.ok(!list.props.data.some((item) => item.verification));
+  list.props.renderItem({ item: verification }).props.children.props.onPress();
+  list = nodes(render()).find((node) => node.type === "FlatList");
+  const expected = run.preview.review.change_sections.flatMap((section) =>
+    section.items.filter((change) => change.confidence === "high"),
+  );
+  assert.deepEqual(
+    list.props.data.filter((item) => item.verification).map((item) => item.change),
+    expected,
+  );
+  assert.ok(
+    list.props.data.some(
+      (item) => item.kind === "warning" && /bullet 2 in work experience 1/.test(item.message),
+    ),
+  );
+  const summary = list.props.data.find((item) => item.section === "summary");
+  assert.equal(summary.title, "Summary Changes (1)");
+  assert.doesNotMatch(
+    text(list.props.ListHeaderComponent),
+    /high risk changes need your attention/,
+  );
+  list.props.renderItem({ item: verification }).props.children.props.onPress();
+  list = nodes(render()).find((node) => node.type === "FlatList");
+  assert.ok(!list.props.data.some((item) => item.verification));
+  // A count without detailed comparisons remains visible and explicitly unavailable.
+  run.preview.review.change_sections = [];
+  list = nodes(render()).find((node) => node.type === "FlatList");
+  list.props
+    .renderItem({ item: list.props.data.find((item) => item.id === "verification-toggle") })
+    .props.children.props.onPress();
+  list = nodes(render()).find((node) => node.type === "FlatList");
+  assert.ok(list.props.data.some((item) => item.id === "verification-unavailable"));
+  run.preview.review.change_summary.high_risk_changes = 0;
+  list = nodes(render()).find((node) => node.type === "FlatList");
+  assert.ok(!list.props.data.some((item) => item.id === "verification-toggle"));
+});
+
+test("Summary comparisons preserve complete paragraphs with full Before strikethrough and word highlights", () => {
+  const original =
+    "Built devices and systems.\n\n" +
+    "Maintained reliable equipment across multiple sites. ".repeat(25);
+  const updated =
+    "Built automation and systems.\n\n" +
+    "Maintained reliable equipment across multiple sites. ".repeat(25);
+  const change = {
+    field_type: "summary",
+    field_path: "summary",
+    change_type: "modified",
+    confidence: "medium",
+    original_value: original,
+    new_value: updated,
+  };
+  const comparison = primitives.ChangeComparison({ change, summaryComparison: true });
+  const sections = nodes(comparison).filter(
+    (node) => node.type === "View" && node.props.className?.includes("border-l-2"),
+  );
+  const before = nodes(sections[0]).find((node) => node.type === "Text" && node.props.selectable);
+  const after = nodes(sections[1]).find((node) => node.type === "Text" && node.props.selectable);
+  assert.equal(text(before), original);
+  assert.equal(text(after), updated);
+  const beforeParts = nodes(before).filter((node) => node !== before && node.type === "Text");
+  assert.ok(beforeParts.every((node) => node.props.className.includes("line-through")));
+  assert.ok(
+    beforeParts.some(
+      (node) => text(node).includes("devices") && node.props.className.includes("text-destructive"),
+    ),
+  );
+  assert.ok(
+    nodes(after).some(
+      (node) => text(node).includes("automation") && node.props.className?.includes("text-primary"),
+    ),
+  );
+  assert.ok(
+    nodes(after).some((node) => node.props.className === "" && text(node).includes("Maintained")),
+  );
+  // Existing Skills/Descriptions styling does not acquire whole-paragraph deletion.
+  const other = primitives.ChangeComparison({ change: { ...change, field_type: "description" } });
+  const otherBefore = nodes(other).find((node) => node.type === "Text" && node.props.selectable);
+  assert.ok(
+    nodes(otherBefore).some(
+      (node) =>
+        node !== otherBefore && node.props.className === "" && text(node).includes("Maintained"),
+    ),
+  );
 });

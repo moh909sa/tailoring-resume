@@ -13,3 +13,5 @@
 - Tailoring runs as a durable Railway background job; saved IDs and GET-only recovery survive backgrounding and relaunch without automatically repeating AI work.
 
 - Grounding checks appear alongside Changes and the final safety review with readable experience/bullet locations; keyword suggestions are never paginated by the backend application limit.
+
+- Review Changes emphasizes primary metrics and a calm expandable verification section, with complete struck-through original summaries beside word-level highlights.

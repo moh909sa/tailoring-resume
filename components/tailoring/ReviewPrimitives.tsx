@@ -180,6 +180,13 @@ const metrics: {
     tint: "bg-success/10",
   },
   {
+    key: "descriptions_modified",
+    label: "Descriptions Modified",
+    icon: "TextCursorInput",
+    color: "text-primary",
+    tint: "bg-primary/10",
+  },
+  {
     key: "skills_removed",
     label: "Skills Removed",
     icon: "ListMinus",
@@ -193,66 +200,23 @@ const metrics: {
     color: "text-tertiary",
     tint: "bg-tertiary/10",
   },
-  {
-    key: "descriptions_modified",
-    label: "Descriptions Modified",
-    icon: "TextCursorInput",
-    color: "text-primary",
-    tint: "bg-primary/10",
-  },
-  {
-    key: "high_risk_changes",
-    label: "High Risk Changes",
-    icon: "ShieldAlert",
-    color: "text-destructive",
-    tint: "bg-destructive/10",
-  },
 ];
 export function ChangeSummaryCards({ summary }: { summary: ChangeSummary }) {
+  const visible = metrics.filter(
+    ({ key }) =>
+      key === "skills_added" || key === "descriptions_modified" || (summary[key] ?? 0) > 0,
+  );
   return (
-    <View className="flex-row flex-wrap gap-2.5">
-      {metrics.map(({ key, label, icon, color, tint }, index) => (
-        <View
-          key={key}
-          className={cn(
-            "gap-3 rounded-2xl border border-border bg-card p-4",
-            index === 4 ? "w-full flex-row items-center" : "w-[47%] grow",
-            index === 4 &&
-              (summary.high_risk_changes ?? 0) > 0 &&
-              "border-destructive/30 bg-destructive/5",
-          )}
-        >
-          {index === 4 ? (
-            <>
-              <View className={cn("h-8 w-8 items-center justify-center rounded-xl", tint)}>
-                <LucideIcon name={icon} size={17} className={color} />
-              </View>
-              <View className="flex-1 gap-1">
-                <Text className="text-h6 text-foreground">{label}</Text>
-                <Text className="text-caption leading-4 text-muted-foreground">
-                  Check these claims carefully
-                </Text>
-              </View>
-              <Text
-                className={cn(
-                  "text-h2 tabular-nums text-foreground",
-                  (summary.high_risk_changes ?? 0) > 0 && "text-destructive",
-                )}
-              >
-                {summary[key] ?? "—"}
-              </Text>
-            </>
-          ) : (
-            <>
-              <View className="flex-row items-center justify-between gap-3">
-                <View className={cn("h-8 w-8 items-center justify-center rounded-xl", tint)}>
-                  <LucideIcon name={icon} size={17} className={color} />
-                </View>
-                <Text className="text-h2 tabular-nums text-foreground">{summary[key] ?? "—"}</Text>
-              </View>
-              <Text className="text-caption leading-4 text-muted-foreground">{label}</Text>
-            </>
-          )}
+    <View className="flex-row flex-wrap justify-between gap-y-2.5">
+      {visible.map(({ key, label, icon, color, tint }) => (
+        <View key={key} className="w-[48%] gap-3 rounded-2xl border border-border bg-card p-4">
+          <View className="flex-row items-center justify-between gap-3">
+            <View className={cn("h-8 w-8 items-center justify-center rounded-xl", tint)}>
+              <LucideIcon name={icon} size={17} className={color} />
+            </View>
+            <Text className="text-h2 tabular-nums text-foreground">{summary[key] ?? "—"}</Text>
+          </View>
+          <Text className="text-caption leading-4 text-muted-foreground">{label}</Text>
         </View>
       ))}
     </View>
@@ -286,6 +250,7 @@ export function SectionToggle({
   onPress,
   icon = "FileText",
   highRisk = false,
+  count,
 }: {
   title: string;
   subtitle?: string;
@@ -293,6 +258,7 @@ export function SectionToggle({
   onPress: () => void;
   icon?: IconName;
   highRisk?: boolean;
+  count?: number;
 }) {
   return (
     <Pressable
@@ -315,6 +281,11 @@ export function SectionToggle({
         <Text className="text-h6 text-foreground">{title}</Text>
         {subtitle ? <Text className="text-caption text-muted-foreground">{subtitle}</Text> : null}
       </View>
+      {count !== undefined ? (
+        <View className="min-w-7 items-center rounded-full bg-primary/10 px-2 py-1">
+          <Text className="text-caption tabular-nums text-primary">{count}</Text>
+        </View>
+      ) : null}
       <LucideIcon
         name={open ? "ChevronUp" : "ChevronDown"}
         size={18}
@@ -375,17 +346,32 @@ export function KeywordOption({
     </Pressable>
   );
 }
-export function ChangeComparison({ change }: { change: ResumeChange }) {
+export function ChangeComparison({
+  change,
+  summaryComparison = false,
+  verification = false,
+}: {
+  change: ResumeChange;
+  summaryComparison?: boolean;
+  verification?: boolean;
+}) {
   const diff = useMemo(
     () => compareWords(change.original_value ?? "", change.new_value ?? ""),
     [change.original_value, change.new_value],
   );
   const highRisk = change.confidence === "high";
+  const calmVerification = verification || summaryComparison;
+  const summaryReplaced =
+    summaryComparison &&
+    change.change_type === "modified" &&
+    !!change.original_value &&
+    !!change.new_value &&
+    change.original_value !== change.new_value;
   return (
     <View
       className={cn(
         "gap-4 rounded-2xl border border-border bg-card p-4",
-        highRisk && "border-destructive/30",
+        highRisk && (calmVerification ? "border-primary/25" : "border-destructive/30"),
       )}
     >
       <View className="flex-row flex-wrap items-center justify-between gap-2">
@@ -397,9 +383,22 @@ export function ChangeComparison({ change }: { change: ResumeChange }) {
               : "Modified wording"}
         </Text>
         {highRisk ? (
-          <View className="flex-row items-center gap-1 rounded-full bg-destructive/10 px-2.5 py-1">
-            <LucideIcon name="ShieldAlert" size={12} className="text-destructive" />
-            <Text className="text-caption text-destructive">High risk</Text>
+          <View
+            className={cn(
+              "flex-row items-center gap-1 rounded-full px-2.5 py-1",
+              calmVerification ? "bg-primary/10" : "bg-destructive/10",
+            )}
+          >
+            <LucideIcon
+              name="ShieldAlert"
+              size={12}
+              className={calmVerification ? "text-primary" : "text-destructive"}
+            />
+            <Text
+              className={cn("text-caption", calmVerification ? "text-primary" : "text-destructive")}
+            >
+              {calmVerification ? "Verify accuracy" : "High risk"}
+            </Text>
           </View>
         ) : null}
       </View>
@@ -415,7 +414,10 @@ export function ChangeComparison({ change }: { change: ResumeChange }) {
             diff.before.map((part, i) => (
               <Text
                 key={i}
-                className={part.changed ? "bg-destructive/10 text-destructive line-through" : ""}
+                className={cn(
+                  summaryReplaced && "line-through",
+                  part.changed && "bg-destructive/10 text-destructive line-through",
+                )}
               >
                 {part.text}
               </Text>
@@ -434,7 +436,7 @@ export function ChangeComparison({ change }: { change: ResumeChange }) {
                 key={i}
                 className={
                   part.changed
-                    ? change.change_type === "added"
+                    ? change.change_type === "added" && !summaryComparison
                       ? "bg-success/10 text-success"
                       : "bg-primary/10 text-primary"
                     : ""
@@ -449,7 +451,12 @@ export function ChangeComparison({ change }: { change: ResumeChange }) {
         </Text>
       </View>
       {highRisk ? (
-        <Text className="text-caption leading-5 text-destructive">
+        <Text
+          className={cn(
+            "text-caption leading-5",
+            calmVerification ? "text-muted-foreground" : "text-destructive",
+          )}
+        >
           Verify this claim is accurate and supported by your experience before saving.
         </Text>
       ) : null}

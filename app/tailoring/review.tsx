@@ -55,8 +55,15 @@ type WizardItem =
       subtitle: string;
       section: string;
       highRisk?: boolean;
+      count?: number;
     }
-  | { id: string; kind: "change"; change: ResumeChange }
+  | {
+      id: string;
+      kind: "change";
+      change: ResumeChange;
+      summaryComparison?: boolean;
+      verification?: boolean;
+    }
   | { id: string; kind: "resume"; item: ReviewItem }
   | { id: string; kind: "placement"; placement: KeywordPlacement }
   | { id: string; kind: "warning"; message: string };
@@ -265,8 +272,7 @@ export default function TailoringReviewScreen() {
       items.push({
         id: "limit",
         kind: "warning",
-        message:
-          "No more skills can be added to this draft. Continue to Changes.",
+        message: "No more skills can be added to this draft. Continue to Changes.",
       });
     if (review.keyword_placements.length) {
       items.push({
@@ -282,6 +288,41 @@ export default function TailoringReviewScreen() {
         );
     }
   }
+  if (run.step === 1) {
+    const verificationChanges = review.change_sections.flatMap((section) =>
+      section.items.filter((change) => change.confidence === "high"),
+    );
+    const verificationCount = review.change_summary.high_risk_changes ?? verificationChanges.length;
+    if (verificationCount > 0 || verificationChanges.length > 0) {
+      items.push({
+        id: "verification-toggle",
+        kind: "section",
+        title: "Changes to Verify",
+        subtitle: "Review these changes to make sure they’re accurate.",
+        section: "verification",
+        count: verificationCount,
+      });
+      if (expanded.has("verification")) {
+        verificationChanges.forEach((change, index) =>
+          items.push({
+            id: `verification-change-${index}`,
+            kind: "change",
+            change,
+            verification: true,
+            summaryComparison: change.field_type === "summary" || change.field_path === "summary",
+          }),
+        );
+        if (!verificationChanges.length || verificationCount > verificationChanges.length) {
+          items.push({
+            id: "verification-unavailable",
+            kind: "heading",
+            title: "Some verification details are unavailable",
+            body: "The service did not return all comparisons for these changes. Reload the review and compare the current draft against your original CV before saving.",
+          });
+        }
+      }
+    }
+  }
   reviewWarningsForStep(review.warnings, run.step).forEach((message, index) =>
     items.push({ id: `warning-${index}`, kind: "warning", message }),
   );
@@ -291,14 +332,22 @@ export default function TailoringReviewScreen() {
       items.push({
         id: `section-${index}`,
         kind: "section",
-        title: sectionTitle(section.type),
+        title:
+          section.type === "summary"
+            ? `Summary Changes (${section.items.length})`
+            : sectionTitle(section.type),
         subtitle: `${section.items.length} change${section.items.length === 1 ? "" : "s"}${highRisk ? " · Contains high risk changes" : ""}`,
         section: section.type,
         highRisk,
       });
       if (expanded.has(section.type))
         section.items.forEach((change, changeIndex) =>
-          items.push({ id: `change-${index}-${changeIndex}`, kind: "change", change }),
+          items.push({
+            id: `change-${index}-${changeIndex}`,
+            kind: "change",
+            change,
+            summaryComparison: section.type === "summary",
+          }),
         );
     });
     if (!review.change_sections.length)
@@ -360,17 +409,26 @@ export default function TailoringReviewScreen() {
             open={expanded.has(item.section)}
             onPress={() => toggle(item.section)}
             highRisk={item.highRisk}
+            count={item.count}
             icon={
               item.section === "placements"
                 ? "MapPin"
-                : item.section === "resume"
-                  ? "FileUser"
-                  : "FileText"
+                : item.section === "verification"
+                  ? "ShieldCheck"
+                  : item.section === "resume"
+                    ? "FileUser"
+                    : "FileText"
             }
           />
         );
       case "change":
-        return <ChangeComparison change={item.change} />;
+        return (
+          <ChangeComparison
+            change={item.change}
+            summaryComparison={item.summaryComparison}
+            verification={item.verification}
+          />
+        );
       case "resume":
         return <ReviewContent item={item.item} />;
       case "placement":
@@ -519,12 +577,6 @@ export default function TailoringReviewScreen() {
             {run.step === 1 ? (
               <>
                 <ChangeSummaryCards summary={review.change_summary} />
-                {(review.change_summary.high_risk_changes ?? 0) > 0 ? (
-                  <SafetyNote
-                    highRisk
-                    message={`${review.change_summary.high_risk_changes} high risk change${review.change_summary.high_risk_changes === 1 ? " needs" : "s need"} your attention. Verify every added skill, qualification, and experience claim.`}
-                  />
-                ) : null}
                 <View className="flex-row flex-wrap gap-4">
                   <Text className="text-caption text-success">+ Added</Text>
                   <Text className="text-caption text-destructive">− Removed</Text>
