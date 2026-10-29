@@ -442,6 +442,21 @@ export default function TailoringReviewScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerClassName="px-6 pb-5"
         keyboardShouldPersistTaps="handled"
+        ListFooterComponent={
+          run.step === 0 && options.applied.length > 0 ? (
+            <View className="flex-row items-start gap-2 px-1 pb-2 pt-1">
+              <LucideIcon name="Info" size={15} className="mt-0.5 text-muted-foreground" />
+              <View className="flex-1 gap-1">
+                <Text className="text-h6 text-muted-foreground">
+                  Want to improve your match further?
+                </Text>
+                <Text className="text-caption leading-5 text-muted-foreground">
+                  You can add more skills, or tap Continue to Changes when you’re ready.
+                </Text>
+              </View>
+            </View>
+          ) : null
+        }
         ListHeaderComponent={
           <View className="mb-5 gap-5">
             <View className="gap-2">
