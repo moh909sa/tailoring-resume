@@ -261,13 +261,6 @@ export default function TailoringReviewScreen() {
         title: "Ready to review",
         body: "No keyword suggestions were returned for this draft. Continue to check the changes.",
       });
-    if (options.applied.length)
-      items.push({
-        id: "applied",
-        kind: "heading",
-        title: `${options.applied.length} keywords applied`,
-        body: options.applied.join(", "),
-      });
     if (options.remaining_slots === 0)
       items.push({
         id: "limit",
