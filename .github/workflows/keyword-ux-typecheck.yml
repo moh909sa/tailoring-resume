@@ -1,0 +1,26 @@
+name: Keyword UX Typecheck
+
+on:
+  pull_request:
+    paths:
+      - 'app/tailoring/review.tsx'
+      - 'lib/tailoring/warnings.ts'
+      - 'components/tailoring/ReviewPrimitives.tsx'
+      - '.github/workflows/keyword-ux-typecheck.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: corepack enable
+      - run: yarn install --immutable
+      - run: yarn typecheck
