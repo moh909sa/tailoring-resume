@@ -15,3 +15,5 @@
 - Grounding checks appear alongside Changes and the final safety review with readable experience/bullet locations; keyword suggestions are never paginated by the backend application limit.
 
 - Review Changes emphasizes primary metrics and a calm expandable verification section, with complete struck-through original summaries beside word-level highlights.
+
+- Review Changes keeps verification warnings with their individual comparisons and shows unmatched safety issues without a separate verification accordion.

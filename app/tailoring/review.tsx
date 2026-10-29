@@ -55,14 +55,12 @@ type WizardItem =
       subtitle: string;
       section: string;
       highRisk?: boolean;
-      count?: number;
     }
   | {
       id: string;
       kind: "change";
       change: ResumeChange;
       summaryComparison?: boolean;
-      verification?: boolean;
     }
   | { id: string; kind: "resume"; item: ReviewItem }
   | { id: string; kind: "placement"; placement: KeywordPlacement }
@@ -288,44 +286,42 @@ export default function TailoringReviewScreen() {
         );
     }
   }
+  const warningsByChange = new Map<ResumeChange, string[]>();
+  reviewWarningsForStep(review.warnings, run.step).forEach((message, index) => {
+    // Step 2 retains every warning. Attach exact backend paths to their
+    // comparison; warnings without a matching comparison stay visible here.
+    const rawWarning = review.warnings[index];
+    const referencedPaths: string[] = rawWarning?.match(/[A-Za-z_]\w*(?:\[\d+\]|\.[A-Za-z_]\w*)+/g) ?? [];
+    const relatedChange =
+      run.step === 1
+        ? review.change_sections
+            .flatMap((section) => section.items)
+            .find((change) => !!change.field_path && referencedPaths.includes(change.field_path))
+        : undefined;
+    if (relatedChange) {
+      warningsByChange.set(relatedChange, [
+        ...(warningsByChange.get(relatedChange) ?? []),
+        message,
+      ]);
+    } else {
+      items.push({ id: `warning-${index}`, kind: "warning", message });
+    }
+  });
   if (run.step === 1) {
-    const verificationChanges = review.change_sections.flatMap((section) =>
-      section.items.filter((change) => change.confidence === "high"),
+    const detailedRiskCount = review.change_sections.reduce(
+      (count, section) =>
+        count + section.items.filter((change) => change.confidence === "high").length,
+      0,
     );
-    const verificationCount = review.change_summary.high_risk_changes ?? verificationChanges.length;
-    if (verificationCount > 0 || verificationChanges.length > 0) {
+    if ((review.change_summary.high_risk_changes ?? 0) > detailedRiskCount) {
       items.push({
-        id: "verification-toggle",
-        kind: "section",
-        title: "Changes to Verify",
-        subtitle: "Review these changes to make sure they’re accurate.",
-        section: "verification",
-        count: verificationCount,
+        id: "verification-unavailable",
+        kind: "warning",
+        message:
+          "Some verification details are unavailable. Reload the review and compare the current draft against your original CV before saving.",
       });
-      if (expanded.has("verification")) {
-        verificationChanges.forEach((change, index) =>
-          items.push({
-            id: `verification-change-${index}`,
-            kind: "change",
-            change,
-            verification: true,
-            summaryComparison: change.field_type === "summary" || change.field_path === "summary",
-          }),
-        );
-        if (!verificationChanges.length || verificationCount > verificationChanges.length) {
-          items.push({
-            id: "verification-unavailable",
-            kind: "heading",
-            title: "Some verification details are unavailable",
-            body: "The service did not return all comparisons for these changes. Reload the review and compare the current draft against your original CV before saving.",
-          });
-        }
-      }
     }
   }
-  reviewWarningsForStep(review.warnings, run.step).forEach((message, index) =>
-    items.push({ id: `warning-${index}`, kind: "warning", message }),
-  );
   if (run.step === 1) {
     review.change_sections.forEach((section, index) => {
       const highRisk = section.items.some((change) => change.confidence === "high");
@@ -333,22 +329,35 @@ export default function TailoringReviewScreen() {
         id: `section-${index}`,
         kind: "section",
         title:
-          section.type === "summary"
-            ? `Summary Changes (${section.items.length})`
-            : sectionTitle(section.type),
+          (
+            {
+              summary: "Summary Changes",
+              skill: "Skills Changes",
+              description: "Description Changes",
+            } as Record<string, string>
+          )[section.type] ?? sectionTitle(section.type),
         subtitle: `${section.items.length} change${section.items.length === 1 ? "" : "s"}${highRisk ? " · Contains high risk changes" : ""}`,
         section: section.type,
         highRisk,
       });
       if (expanded.has(section.type))
-        section.items.forEach((change, changeIndex) =>
+        section.items.forEach((change, changeIndex) => {
           items.push({
             id: `change-${index}-${changeIndex}`,
             kind: "change",
             change,
             summaryComparison: section.type === "summary",
-          }),
-        );
+          });
+          warningsByChange
+            .get(change)
+            ?.forEach((message, warningIndex) =>
+              items.push({
+                id: `change-warning-${index}-${changeIndex}-${warningIndex}`,
+                kind: "warning",
+                message,
+              }),
+            );
+        });
     });
     if (!review.change_sections.length)
       items.push({
@@ -409,26 +418,17 @@ export default function TailoringReviewScreen() {
             open={expanded.has(item.section)}
             onPress={() => toggle(item.section)}
             highRisk={item.highRisk}
-            count={item.count}
             icon={
               item.section === "placements"
                 ? "MapPin"
-                : item.section === "verification"
-                  ? "ShieldCheck"
-                  : item.section === "resume"
-                    ? "FileUser"
-                    : "FileText"
+                : item.section === "resume"
+                  ? "FileUser"
+                  : "FileText"
             }
           />
         );
       case "change":
-        return (
-          <ChangeComparison
-            change={item.change}
-            summaryComparison={item.summaryComparison}
-            verification={item.verification}
-          />
-        );
+        return <ChangeComparison change={item.change} summaryComparison={item.summaryComparison} />;
       case "resume":
         return <ReviewContent item={item.item} />;
       case "placement":

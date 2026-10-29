@@ -301,48 +301,59 @@ test("summary cards keep primary metrics and only positive optional counts", () 
   );
 });
 
-test("verification accordion uses backend classification and preserves separate safety issues", () => {
+test("simplified Changes preserves individual risks, dynamic counts and unmatched warnings", () => {
   const { run, render } = screenHarness();
   run.step = 1;
   let list = nodes(render()).find((node) => node.type === "FlatList");
-  const verification = list.props.data.find((item) => item.id === "verification-toggle");
-  assert.equal(verification.title, "Changes to Verify");
-  assert.equal(verification.count, run.preview.review.change_summary.high_risk_changes);
-  assert.ok(!list.props.data.some((item) => item.verification));
-  list.props.renderItem({ item: verification }).props.children.props.onPress();
+  assert.ok(!list.props.data.some((item) => item.id === "verification-toggle"));
+  for (const [section, title] of [
+    ["summary", "Summary Changes"],
+    ["skill", "Skills Changes"],
+    ["description", "Description Changes"],
+  ]) {
+    const accordion = list.props.data.find((item) => item.section === section);
+    assert.equal(accordion.title, title);
+    assert.ok(
+      accordion.subtitle.startsWith(
+        String(
+          run.preview.review.change_sections.find((item) => item.type === section).items.length,
+        ),
+      ),
+    );
+  }
+  // Every original comparison, including high-risk ones, is still expandable.
+  for (const section of run.preview.review.change_sections) {
+    list = nodes(render()).find((node) => node.type === "FlatList");
+    const accordion = list.props.data.find((item) => item.section === section.type);
+    if (section.type !== "summary")
+      list.props.renderItem({ item: accordion }).props.children.props.onPress();
+  }
   list = nodes(render()).find((node) => node.type === "FlatList");
-  const expected = run.preview.review.change_sections.flatMap((section) =>
-    section.items.filter((change) => change.confidence === "high"),
-  );
   assert.deepEqual(
-    list.props.data.filter((item) => item.verification).map((item) => item.change),
-    expected,
+    list.props.data.filter((item) => item.kind === "change").map((item) => item.change),
+    run.preview.review.change_sections.flatMap((section) => section.items),
   );
   assert.ok(
     list.props.data.some(
       (item) => item.kind === "warning" && /bullet 2 in work experience 1/.test(item.message),
     ),
   );
-  const summary = list.props.data.find((item) => item.section === "summary");
-  assert.equal(summary.title, "Summary Changes (1)");
-  assert.doesNotMatch(
-    text(list.props.ListHeaderComponent),
-    /high risk changes need your attention/,
-  );
-  list.props.renderItem({ item: verification }).props.children.props.onPress();
+  assert.ok(list.props.data.some((item) => item.id === "resume-toggle"));
+  // A warning with an exact comparison path belongs beside that comparison.
+  const target = run.preview.review.change_sections.find(
+    (section) => section.type === "description",
+  ).items[0];
+  run.preview.review.warnings.push(`Check ${target.field_path} against your original CV.`);
   list = nodes(render()).find((node) => node.type === "FlatList");
-  assert.ok(!list.props.data.some((item) => item.verification));
-  // A count without detailed comparisons remains visible and explicitly unavailable.
+  const changeIndex = list.props.data.findIndex((item) => item.change === target);
+  assert.equal(list.props.data[changeIndex + 1].message, run.preview.review.warnings.at(-1));
   run.preview.review.change_sections = [];
   list = nodes(render()).find((node) => node.type === "FlatList");
-  list.props
-    .renderItem({ item: list.props.data.find((item) => item.id === "verification-toggle") })
-    .props.children.props.onPress();
-  list = nodes(render()).find((node) => node.type === "FlatList");
   assert.ok(list.props.data.some((item) => item.id === "verification-unavailable"));
+  assert.ok(list.props.data.some((item) => item.message === run.preview.review.warnings.at(-1)));
   run.preview.review.change_summary.high_risk_changes = 0;
   list = nodes(render()).find((node) => node.type === "FlatList");
-  assert.ok(!list.props.data.some((item) => item.id === "verification-toggle"));
+  assert.ok(!list.props.data.some((item) => item.id === "verification-unavailable"));
 });
 
 test("Summary comparisons preserve complete paragraphs with full Before strikethrough and word highlights", () => {
