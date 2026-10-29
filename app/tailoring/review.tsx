@@ -311,17 +311,19 @@ export default function TailoringReviewScreen() {
             : "Detailed comparisons are unavailable. Reload the review, then check the full resume before saving.",
       });
   }
-  items.push({
-    id: "resume-toggle",
-    kind: "section",
-    title: "Preview current resume",
-    subtitle: "Read the complete draft",
-    section: "resume",
-  });
-  if (expanded.has("resume"))
-    reviewItems(run.preview.preview, "resume").forEach((item) =>
-      items.push({ id: "resume-" + item.id, kind: "resume", item }),
-    );
+  if (run.step !== 0) {
+    items.push({
+      id: "resume-toggle",
+      kind: "section",
+      title: "Preview current resume",
+      subtitle: "Read the complete draft",
+      section: "resume",
+    });
+    if (expanded.has("resume"))
+      reviewItems(run.preview.preview, "resume").forEach((item) =>
+        items.push({ id: "resume-" + item.id, kind: "resume", item }),
+      );
+  }
 
   function renderItem(item: WizardItem) {
     switch (item.kind) {
