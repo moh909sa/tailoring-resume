@@ -693,3 +693,65 @@ test("explicit sectionMeta order and user section names survive while identity a
   assert.equal(items[1].label, "Community Service");
   assert.ok(!items.some((item) => item.id === "sectionMeta"));
 });
+
+test("Save renders one continuous document with one heading per multi-entry section", () => {
+  const { run, render } = screenHarness();
+  run.step = 2;
+  const resume = run.preview.preview.resume_preview;
+  resume.workExperience.push({
+    title: "Second position",
+    company: "Second company",
+    dates: "2018–2020",
+    description: ["A complete long responsibility. ".repeat(30), "Another exact bullet."],
+  });
+  resume.education = [
+    { degree: "First degree", institution: "First school", years: "2010–2014" },
+    { degree: "Second degree", institution: "Second school", years: "2014–2016" },
+  ];
+  resume.unexpectedSection = { detail: "Unknown resume content remains." };
+  const before = JSON.stringify(resume);
+  const list = nodes(render()).find((node) => node.type === "FlatList");
+  const rows = list.props.data.filter((item) => item.kind === "resume");
+  const headings = [];
+  for (let index = 0; index < rows.length; index++) {
+    const wrapper = list.props.renderItem({ item: rows[index] });
+    assert.ok(wrapper.props.className.includes("border-x"));
+    assert.equal(wrapper.props.className.includes("rounded-t-2xl"), index === 0);
+    assert.equal(wrapper.props.className.includes("rounded-b-2xl"), index === rows.length - 1);
+    assert.equal(wrapper.props.className.includes("mb-3"), index === rows.length - 1);
+    assert.equal(wrapper.props.children.props.document, true);
+    const content = previewContent.ReviewContent(wrapper.props.children.props);
+    assert.doesNotMatch(content.props.className, /rounded|bg-card/);
+    headings.push(
+      ...nodes(content)
+        .filter((node) => node.props.accessibilityRole === "header")
+        .map(text),
+    );
+  }
+  assert.equal(headings.filter((value) => value === "Work Experience").length, 1);
+  assert.equal(headings.filter((value) => value === "Education").length, 1);
+  assert.equal(rows[0].item.profile, true);
+  assert.equal(rows.filter((item) => item.item.id.startsWith("workExperience")).length, 2);
+  assert.equal(rows.filter((item) => item.item.id.startsWith("education")).length, 2);
+  assert.ok(rows.some((item) => item.item.value === resume.unexpectedSection));
+  // Render the document's pure value components to verify every field and long
+  // paragraph remains present in its original entry order.
+  function presentationText(element) {
+    if (element == null || typeof element === "boolean") return "";
+    if (Array.isArray(element)) return element.map(presentationText).join("");
+    if (typeof element !== "object") return String(element);
+    if (typeof element.type === "function") return presentationText(element.type(element.props));
+    return presentationText(element.props?.children);
+  }
+  const output = rows
+    .map((item) =>
+      presentationText(previewContent.ReviewContent({ item: item.item, document: true })),
+    )
+    .join("");
+  assert.ok(output.includes(resume.workExperience[1].description[0]));
+  assert.ok(output.includes("Second positionSecond company"));
+  assert.ok(output.indexOf("First degree") < output.indexOf("Second degree"));
+  assert.ok(output.includes("First school"));
+  assert.ok(output.includes("Second school"));
+  assert.equal(JSON.stringify(resume), before);
+});

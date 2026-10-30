@@ -23,3 +23,5 @@
 - Save uses three live metrics and a neutral expandable verification review, retaining all safety details and explicit authenticated confirmation.
 
 - Save displays an ordered complete CV directly; inline editing remains unavailable until authenticated versioned draft updates and revision-bound confirmation are supported.
+
+- The read-only Save CV uses a continuous professional document layout with shared section headings, subtle dividers, and grouped entries.

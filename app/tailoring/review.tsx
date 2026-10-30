@@ -402,7 +402,7 @@ export default function TailoringReviewScreen() {
       id: "resume-heading",
       kind: "heading",
       title: "Your tailored CV",
-      body: "Read-only review. Editing will be available when draft changes can be saved securely.",
+      body: "Read-only CV preview.",
     });
     reviewItems(run.preview.preview, "resume").forEach((item) =>
       items.push({ id: "resume-" + item.id, kind: "resume", item }),
@@ -482,7 +482,7 @@ export default function TailoringReviewScreen() {
           </View>
         );
       case "resume":
-        return <ReviewContent item={item.item} />;
+        return <ReviewContent item={item.item} document />;
       case "placement":
         return (
           <View className="gap-1.5 rounded-xl bg-secondary/50 p-4">
@@ -508,6 +508,21 @@ export default function TailoringReviewScreen() {
     }
   }
   function renderRow(item: WizardItem, index = items.indexOf(item)) {
+    if (item.kind === "resume") {
+      const first = items[index - 1]?.kind !== "resume";
+      const last = items[index + 1]?.kind !== "resume";
+      return (
+        <View
+          className={cn(
+            "border-x border-border bg-card",
+            first && "overflow-hidden rounded-t-2xl border-t",
+            last && "mb-3 overflow-hidden rounded-b-2xl border-b",
+          )}
+        >
+          {renderItem(item)}
+        </View>
+      );
+    }
     if (!item.connected) return <View className="mb-3">{renderItem(item)}</View>;
     const header = item.kind === "section";
     const last = items[index + 1]?.connected !== item.connected;

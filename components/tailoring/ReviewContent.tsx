@@ -1,5 +1,6 @@
 import { View } from "react-native";
 import { Text } from "@/components/ui/text";
+import { cn } from "@/lib/utils";
 import { isJsonObject, type JsonValue, type JsonObject } from "@/lib/tailoring/types";
 
 const labels: Record<string, string> = {
@@ -181,7 +182,7 @@ export function reviewItems(
   return keys.flatMap((key) => entries(key, preview[key]));
 }
 
-function ValueView({ value }: { value: JsonValue }) {
+function ValueView({ value, document = false }: { value: JsonValue; document?: boolean }) {
   if (!hasContent(value)) return null;
   if (Array.isArray(value))
     return (
@@ -190,7 +191,7 @@ function ValueView({ value }: { value: JsonValue }) {
           <View key={index} className={typeof item === "string" ? "flex-row gap-2" : "gap-2"}>
             {typeof item === "string" ? <Text className="text-body text-primary">•</Text> : null}
             <View className="flex-1">
-              <ValueView value={item} />
+              <ValueView value={item} document={document} />
             </View>
           </View>
         ))}
@@ -198,15 +199,43 @@ function ValueView({ value }: { value: JsonValue }) {
     );
   if (isJsonObject(value))
     return (
-      <View className="gap-4">
+      <View className={document ? "gap-2.5" : "gap-4"}>
         {Object.entries(value)
           .filter(([key, item]) => !hidden.has(key) && hasContent(item))
-          .map(([key, item]) => (
-            <View key={key} className="gap-1.5">
-              <Text className="text-caption text-muted-foreground">{readableLabel(key)}</Text>
-              <ValueView value={item} />
-            </View>
-          ))}
+          .map(([key, item]) => {
+            // Keep each entry's exact field order. Present familiar identity,
+            // organization and responsibility fields as document text, while
+            // retaining readable labels for all other and unknown fields.
+            const prominent =
+              document &&
+              ["title", "position", "role", "degree", "name"].includes(key) &&
+              typeof item === "string";
+            const organization =
+              document &&
+              ["company", "institution", "school", "university"].includes(key) &&
+              typeof item === "string";
+            const prose =
+              document &&
+              ["description", "responsibilities", "highlights", "bullets"].includes(key);
+            return (
+              <View key={key} className="gap-1.5">
+                {!prominent && !organization && !prose ? (
+                  <Text className="text-caption text-muted-foreground">{readableLabel(key)}</Text>
+                ) : null}
+                {prominent ? (
+                  <Text selectable className="text-h6 leading-6 text-foreground">
+                    {item}
+                  </Text>
+                ) : organization ? (
+                  <Text selectable className="text-body leading-6 text-muted-foreground">
+                    {item}
+                  </Text>
+                ) : (
+                  <ValueView value={item} document={document} />
+                )}
+              </View>
+            );
+          })}
       </View>
     );
   return (
@@ -216,7 +245,13 @@ function ValueView({ value }: { value: JsonValue }) {
   );
 }
 
-export function ReviewContent({ item }: { item: ReviewItem }) {
+export function ReviewContent({
+  item,
+  document = false,
+}: {
+  item: ReviewItem;
+  document?: boolean;
+}) {
   const value = item.value;
   if ((item.profile || item.id === "personalInfo") && isJsonObject(value)) {
     const nameKey = ["name", "fullName", "full_name"].find(
@@ -232,9 +267,16 @@ export function ReviewContent({ item }: { item: ReviewItem }) {
     const used = new Set([nameKey, titleKey, ...contact]);
     const remaining = Object.fromEntries(Object.entries(value).filter(([key]) => !used.has(key)));
     return (
-      <View className="mb-6 gap-3 border-b border-border pb-6">
+      <View
+        className={document ? "gap-3 px-5 pb-6 pt-5" : "mb-6 gap-3 border-b border-border pb-6"}
+      >
         {nameKey ? (
-          <Text selectable className="text-h2 text-foreground">
+          <Text
+            selectable
+            className={
+              document ? "text-h1 tracking-tight text-foreground" : "text-h2 text-foreground"
+            }
+          >
             {String(value[nameKey])}
           </Text>
         ) : null}
@@ -248,56 +290,68 @@ export function ReviewContent({ item }: { item: ReviewItem }) {
             {contact.map((key) => String(value[key])).join(" · ")}
           </Text>
         ) : null}
-        {hasContent(remaining) ? <ValueView value={remaining} /> : null}
+        {hasContent(remaining) ? <ValueView value={remaining} document={document} /> : null}
       </View>
     );
   }
   const isChange = item.id.startsWith("detailed_changes") && isJsonObject(value);
   return (
-    <View className="mb-5 gap-4 rounded-2xl border border-border bg-card p-5">
-      {!item.continuation ? (
-        <Text accessibilityRole="header" className="text-h4 text-foreground">
-          {isChange && typeof value.field_type === "string"
-            ? readableLabel(value.field_type)
-            : item.label}
-        </Text>
-      ) : null}
-      {isChange ? (
-        <View className="gap-4">
-          {hasContent(value.original_value) ? (
-            <View className="gap-1.5 border-l-2 border-border pl-3">
-              <Text className="text-caption text-muted-foreground">Before</Text>
-              <ValueView value={value.original_value} />
-            </View>
-          ) : null}
-          {hasContent(value.new_value) ? (
-            <View className="gap-1.5 border-l-2 border-primary pl-3">
-              <Text className="text-caption text-primary">After</Text>
-              <ValueView value={value.new_value} />
-            </View>
-          ) : null}
-          {typeof value.change_type === "string" ? (
-            <Text className="text-caption text-muted-foreground">
-              {readableLabel(value.change_type)}
-            </Text>
-          ) : null}
-        </View>
-      ) : item.custom && isJsonObject(value) ? (
-        <View className="gap-4">
-          {["text", "strings", "items"]
-            .filter((key) => hasContent(value[key]))
-            .map((key) => (
-              <ValueView key={key} value={value[key]} />
-            ))}
-          <ValueView
-            value={Object.fromEntries(
-              Object.entries(value).filter(([key]) => !["text", "strings", "items"].includes(key)),
-            )}
-          />
-        </View>
-      ) : (
-        <ValueView value={value} />
-      )}
+    <View
+      className={document ? "px-5 pb-5" : "mb-5 gap-4 rounded-2xl border border-border bg-card p-5"}
+    >
+      <View
+        className={cn("gap-4", document && !item.continuation && "border-t border-border pt-5")}
+      >
+        {!item.continuation ? (
+          <Text
+            accessibilityRole="header"
+            className={document ? "text-h5 text-primary" : "text-h4 text-foreground"}
+          >
+            {isChange && typeof value.field_type === "string"
+              ? readableLabel(value.field_type)
+              : item.label}
+          </Text>
+        ) : null}
+        {isChange ? (
+          <View className="gap-4">
+            {hasContent(value.original_value) ? (
+              <View className="gap-1.5 border-l-2 border-border pl-3">
+                <Text className="text-caption text-muted-foreground">Before</Text>
+                <ValueView value={value.original_value} />
+              </View>
+            ) : null}
+            {hasContent(value.new_value) ? (
+              <View className="gap-1.5 border-l-2 border-primary pl-3">
+                <Text className="text-caption text-primary">After</Text>
+                <ValueView value={value.new_value} />
+              </View>
+            ) : null}
+            {typeof value.change_type === "string" ? (
+              <Text className="text-caption text-muted-foreground">
+                {readableLabel(value.change_type)}
+              </Text>
+            ) : null}
+          </View>
+        ) : item.custom && isJsonObject(value) ? (
+          <View className="gap-4">
+            {["text", "strings", "items"]
+              .filter((key) => hasContent(value[key]))
+              .map((key) => (
+                <ValueView key={key} value={value[key]} document={document} />
+              ))}
+            <ValueView
+              document={document}
+              value={Object.fromEntries(
+                Object.entries(value).filter(
+                  ([key]) => !["text", "strings", "items"].includes(key),
+                ),
+              )}
+            />
+          </View>
+        ) : (
+          <ValueView value={value} document={document} />
+        )}
+      </View>
     </View>
   );
 }
