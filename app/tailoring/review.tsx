@@ -44,7 +44,7 @@ const stepCopy = [
     title: "Review changes",
     body: "See exactly what changed, and make sure every claim feels true to you.",
   },
-  { title: "Confirm & save", body: "One final check before saving your tailored CV." },
+  { title: "Confirm & Save", body: "" },
 ];
 type WizardItem = { connected?: string } & (
   | { id: string; kind: "heading"; title: string; body: string }
@@ -56,6 +56,7 @@ type WizardItem = { connected?: string } & (
       subtitle: string;
       section: string;
       highRisk?: boolean;
+      count?: number;
     }
   | {
       id: string;
@@ -63,10 +64,12 @@ type WizardItem = { connected?: string } & (
       change: ResumeChange;
       summaryComparison?: boolean;
       descriptionComparison?: boolean;
+      verification?: boolean;
     }
   | { id: string; kind: "resume"; item: ReviewItem }
   | { id: string; kind: "placement"; placement: KeywordPlacement }
   | { id: string; kind: "warning"; message: string }
+  | { id: string; kind: "review-note"; message: string }
   | { id: string; kind: "skill-added"; change: ResumeChange }
 );
 
@@ -292,6 +295,7 @@ export default function TailoringReviewScreen() {
   }
   const warningsByChange = new Map<ResumeChange, string[]>();
   reviewWarningsForStep(review.warnings, run.step).forEach((message, index) => {
+    if (run.step === 2) return; // Save groups these same warnings below.
     // Step 2 retains every warning. Attach exact backend paths to their
     // comparison; warnings without a matching comparison stay visible here.
     const rawWarning = review.warnings[index];
@@ -394,35 +398,63 @@ export default function TailoringReviewScreen() {
       });
   }
   if (run.step === 2) {
-    const skillChecks = review.change_sections.flatMap((section) =>
-      section.type === "skill"
-        ? section.items.filter(
-            (change) => change.change_type === "added" && change.confidence === "high",
-          )
-        : [],
+    const flaggedChanges = review.change_sections.flatMap((section) =>
+      section.items.filter((change) => change.confidence === "high"),
     );
-    if (skillChecks.length) {
-      items.push({
-        id: "skill-verification-heading",
-        kind: "heading",
-        title: "Skills to verify before saving",
-        body: "These added skills still require verification. Confirm that each claim is accurate and supported by your experience.",
-      });
-      skillChecks.forEach((change, index) =>
+    const specificWarnings = reviewWarningsForStep(review.warnings, 2);
+    const missingDetails = (review.change_summary.high_risk_changes ?? 0) > flaggedChanges.length;
+    const detailCount = specificWarnings.length + flaggedChanges.length + (missingDetails ? 1 : 0);
+    items.push({
+      id: "save-review-toggle",
+      kind: "section",
+      section: "save-review",
+      title: "Review your information",
+      subtitle: "Make sure all added skills and experience details are accurate before saving.",
+      count: detailCount || undefined,
+      connected: "save-review",
+    });
+    if (expanded.has("save-review")) {
+      specificWarnings.forEach((message, index) =>
         items.push({
-          id: `skill-verification-${index}`,
-          kind: "warning",
-          message: change.new_value
-            ? `Verify this added skill against your original CV and experience: ${change.new_value}`
-            : "An added skill requires verification, but its details are unavailable. Reload the review before saving.",
+          id: `save-review-warning-${index}`,
+          kind: "review-note",
+          message,
+          connected: "save-review",
         }),
       );
+      flaggedChanges.forEach((change, index) =>
+        items.push({
+          id: `save-review-change-${index}`,
+          kind: "change",
+          change,
+          verification: true,
+          summaryComparison: change.field_type === "summary",
+          descriptionComparison: change.field_type === "description",
+          connected: "save-review",
+        }),
+      );
+      if (missingDetails)
+        items.push({
+          id: "save-review-unavailable",
+          kind: "review-note",
+          connected: "save-review",
+          message:
+            "Some flagged changes have no detailed comparisons available. Reload the review and compare the complete draft against your original CV before saving.",
+        });
+      if (!detailCount)
+        items.push({
+          id: "save-review-general",
+          kind: "review-note",
+          connected: "save-review",
+          message:
+            "Check the complete preview before saving. No specific verification details were returned for this draft.",
+        });
     }
     items.push({
       id: "resume-toggle",
       kind: "section",
       title: "Preview updated CV",
-      subtitle: "Read the complete draft",
+      subtitle: "Read-only text preview of the complete draft",
       section: "resume",
     });
     if (expanded.has("resume"))
@@ -466,13 +498,16 @@ export default function TailoringReviewScreen() {
             open={expanded.has(item.section)}
             onPress={() => toggle(item.section)}
             highRisk={item.highRisk}
+            count={item.count}
             embedded={!!item.connected}
             icon={
               item.section === "placements"
                 ? "MapPin"
-                : item.section === "resume"
-                  ? "FileUser"
-                  : "FileText"
+                : item.section === "save-review"
+                  ? "ShieldCheck"
+                  : item.section === "resume"
+                    ? "FileUser"
+                    : "FileText"
             }
           />
         );
@@ -482,6 +517,7 @@ export default function TailoringReviewScreen() {
             change={item.change}
             summaryComparison={item.summaryComparison}
             descriptionComparison={item.descriptionComparison}
+            verification={item.verification}
             embedded={!!item.connected}
           />
         );
@@ -514,6 +550,15 @@ export default function TailoringReviewScreen() {
         );
       case "warning":
         return <SafetyNote message={item.message} />;
+      case "review-note":
+        return (
+          <View className="flex-row items-start gap-2.5 p-4">
+            <LucideIcon name="Info" size={16} className="mt-0.5 text-muted-foreground" />
+            <Text className="text-caption flex-1 leading-5 text-muted-foreground">
+              {item.message}
+            </Text>
+          </View>
+        );
     }
   }
   function renderRow(item: WizardItem, index = items.indexOf(item)) {
@@ -603,9 +648,11 @@ export default function TailoringReviewScreen() {
               <Text accessibilityRole="header" className="text-h2 tracking-tight text-foreground">
                 {stepCopy[run.step].title}
               </Text>
-              <Text className="text-body leading-6 text-muted-foreground">
-                {stepCopy[run.step].body}
-              </Text>
+              {stepCopy[run.step].body ? (
+                <Text className="text-body leading-6 text-muted-foreground">
+                  {stepCopy[run.step].body}
+                </Text>
+              ) : null}
             </View>
             {busy ? (
               <View accessibilityLiveRegion="polite" className="flex-row items-center gap-2.5">
@@ -672,55 +719,36 @@ export default function TailoringReviewScreen() {
             ) : null}
             {run.step === 2 ? (
               <>
-                <View className="gap-5 rounded-3xl border border-border bg-card p-5">
-                  <View className="flex-row items-start gap-3">
-                    <View className="h-11 w-11 items-center justify-center rounded-2xl bg-primary/10">
-                      <LucideIcon name="FileCheck" size={23} className="text-primary" />
-                    </View>
-                    <View className="flex-1 gap-1">
-                      <Text className="text-h5 text-foreground">Your tailored CV</Text>
-                      <Text className="text-caption leading-5 text-muted-foreground">
-                        {run.input?.filename ?? "Based on your original CV"}
-                      </Text>
-                    </View>
+                <View className="gap-4 rounded-3xl border border-border bg-card p-4">
+                  <View className="flex-row items-center gap-2">
+                    <LucideIcon name="FileCheck" size={19} className="text-primary" />
+                    <Text className="text-h5 text-foreground">Your tailored CV</Text>
                   </View>
-                  <View className="flex-row justify-between gap-5 border-t border-border pt-4">
-                    <View className="gap-1">
-                      <Text className="text-caption text-muted-foreground">ATS match score</Text>
-                      <Text className="text-h3 text-foreground">
-                        {score === null ? "Unavailable" : `${formatScore(score)}/100`}
-                      </Text>
-                    </View>
-                    <View className="gap-1">
-                      <Text className="text-caption text-muted-foreground">Changes to review</Text>
-                      <Text className="text-h3 text-foreground">
-                        {review.change_summary.total_changes ?? "Unavailable"}
-                      </Text>
-                    </View>
+                  <View className="flex-row gap-2">
+                    {[
+                      { label: "ATS Score", value: score === null ? null : formatScore(score) },
+                      { label: "Changes Made", value: review.change_summary.total_changes },
+                      { label: "Keywords Applied", value: options.applied.length },
+                    ].map(({ label, value }) => (
+                      <View
+                        key={label}
+                        accessibilityLabel={`${label}: ${value ?? "unavailable"}`}
+                        className="min-w-0 flex-1 items-center gap-2 rounded-2xl bg-secondary/60 px-1 py-3"
+                      >
+                        <Text className="text-h2 tabular-nums text-foreground">{value ?? "—"}</Text>
+                        <Text className="text-caption text-center leading-4 text-muted-foreground">
+                          {label}
+                        </Text>
+                      </View>
+                    ))}
                   </View>
-                  <Text className="text-caption leading-5 text-muted-foreground">
-                    {options.applied.length} keywords applied to this draft.
-                  </Text>
-                </View>
-                <View className="flex-row items-start gap-3 rounded-2xl bg-primary/5 p-4">
-                  <LucideIcon name="ShieldCheck" size={20} className="text-primary" />
-                  <View className="flex-1 gap-1">
-                    <Text className="text-h6 text-foreground">
-                      Your original CV stays unchanged
-                    </Text>
-                    <Text className="text-caption leading-5 text-muted-foreground">
-                      We’ll save a separate tailored CV only when you tap Confirm & Save.
+                  <View className="flex-row items-center justify-center gap-2 border-t border-border pt-3">
+                    <LucideIcon name="ShieldCheck" size={15} className="text-muted-foreground" />
+                    <Text className="text-caption flex-shrink leading-5 text-muted-foreground">
+                      Your original CV stays unchanged.
                     </Text>
                   </View>
                 </View>
-                <SafetyNote
-                  highRisk={(review.change_summary.high_risk_changes ?? 0) > 0}
-                  message={
-                    (review.change_summary.high_risk_changes ?? 0) > 0
-                      ? `${review.change_summary.high_risk_changes} high risk change${review.change_summary.high_risk_changes === 1 ? "" : "s"}. Confirm that every claim is accurate and that you can discuss it in an interview.`
-                      : "Check that all skills, qualifications, and experience claims are accurate. AI can make mistakes."
-                  }
-                />
                 {run.selectedKeywords.length ? (
                   <View className="gap-2">
                     <Text className="text-caption leading-5 text-muted-foreground">

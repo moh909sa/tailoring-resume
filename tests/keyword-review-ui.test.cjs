@@ -76,6 +76,7 @@ const primitivesMocks = {
   "@/theming/ThemeProvider": { useTheme: () => ({ theme }) },
 };
 const primitives = loadSource("components/tailoring/ReviewPrimitives.tsx", primitivesMocks);
+const previewContent = loadSource("components/tailoring/ReviewContent.tsx", primitivesMocks);
 
 test("keyword toggles retain stable classes, checked state and visible selection on repeated presses", () => {
   const selected = new Set();
@@ -182,7 +183,7 @@ function screenHarness() {
     "@/components/ui/button": { Button: "Button" },
     "@/components/cv/Notice": { Notice: "Notice" },
     "@/components/tailoring/ReviewContent": {
-      reviewItems: () => [],
+      reviewItems: previewContent.reviewItems,
       ReviewContent: "ReviewContent",
     },
     "@/components/tailoring/ReviewPrimitives": primitives,
@@ -347,7 +348,7 @@ test("simplified Changes preserves individual risks, dynamic counts and unmatche
     saveList.props.data.find((item) => item.id === "resume-toggle").title,
     "Preview updated CV",
   );
-  assert.ok(saveList.props.data.some((item) => item.id === "skill-verification-heading"));
+  assert.ok(saveList.props.data.some((item) => item.id === "save-review-toggle"));
   run.step = 1;
   // A warning with an exact comparison path belongs beside that comparison.
   const target = run.preview.review.change_sections.find(
@@ -459,13 +460,17 @@ test("connected accordions have no inter-row gaps and skill additions remain com
   list = nodes(render()).find((node) => node.type === "FlatList");
   assert.equal(list.props.data.filter((item) => item.connected === "skill").length, 1);
   run.step = 2;
-  const saveList = nodes(render()).find((node) => node.type === "FlatList");
+  let saveList = nodes(render()).find((node) => node.type === "FlatList");
+  saveList.props
+    .renderItem({ item: saveList.props.data.find((item) => item.id === "save-review-toggle") })
+    .props.children.props.onPress();
+  saveList = nodes(render()).find((node) => node.type === "FlatList");
   assert.ok(
     saveList.props.data.some((item) => item.message === run.preview.review.warnings.at(-1)),
   );
   assert.ok(
     saveList.props.data.some(
-      (item) => item.id === "skill-verification-0" && item.message.includes(skill.change.new_value),
+      (item) => item.verification && item.change.new_value === skill.change.new_value,
     ),
   );
   assert.equal(
@@ -510,4 +515,112 @@ test("descriptions share Summary replacement treatment without altering backend 
       (node) => text(node).includes("automation") && node.props.className?.includes("text-primary"),
     ),
   );
+});
+
+test("Save uses three live metrics and one neutral expandable review section, followed by the full preview", () => {
+  const { run, render } = screenHarness();
+  run.step = 2;
+  run.preview = makeReview("latest-preview", 81, ["PLC", "OPC-UA"], [76, 81]);
+  let screen = render();
+  let list = nodes(screen).find((node) => node.type === "FlatList");
+  const metrics = nodes(list.props.ListHeaderComponent).filter(
+    (node) =>
+      node.props.accessibilityLabel &&
+      /^(ATS Score|Changes Made|Keywords Applied):/.test(node.props.accessibilityLabel),
+  );
+  assert.deepEqual(
+    metrics.map((node) => node.props.accessibilityLabel),
+    ["ATS Score: 81", "Changes Made: 6", "Keywords Applied: 2"],
+  );
+  assert.ok(metrics.every((node) => node.props.className.includes("flex-1")));
+  assert.match(text(list.props.ListHeaderComponent), /Your original CV stays unchanged\./);
+  assert.doesNotMatch(
+    text(list.props.ListHeaderComponent),
+    /high risk change|separate tailored CV|keywords applied to this draft/,
+  );
+  assert.equal(list.props.data[0].title, "Review your information");
+  assert.equal(
+    list.props.data[0].subtitle,
+    "Make sure all added skills and experience details are accurate before saving.",
+  );
+  assert.ok(
+    !list.props.data.some(
+      (item) => item.kind === "warning" || item.kind === "review-note" || item.verification,
+    ),
+  );
+  list.props.renderItem({ item: list.props.data[0] }).props.children.props.onPress();
+  list = nodes(render()).find((node) => node.type === "FlatList");
+  assert.deepEqual(
+    list.props.data.filter((item) => item.kind === "review-note").map((item) => item.message),
+    warnings.reviewWarningsForStep(run.preview.review.warnings, 2),
+  );
+  assert.equal(list.props.data.filter((item) => item.verification).length, 2);
+  for (const item of list.props.data.filter((item) => item.kind === "review-note")) {
+    assert.doesNotMatch(
+      list.props.renderItem({ item }).props.children.props.className,
+      /warning|destructive/,
+    );
+  }
+  const preview = list.props.data.find((item) => item.id === "resume-toggle");
+  assert.equal(preview.title, "Preview updated CV");
+  assert.match(preview.subtitle, /Read-only text preview/);
+  list.props.renderItem({ item: preview }).props.children.props.onPress();
+  list = nodes(render()).find((node) => node.type === "FlatList");
+  assert.deepEqual(
+    list.props.data.filter((item) => item.kind === "resume").map((item) => item.item),
+    previewContent.reviewItems(run.preview.preview, "resume"),
+  );
+  run.preview.review.change_sections = [];
+  list = nodes(render()).find((node) => node.type === "FlatList");
+  assert.ok(list.props.data.some((item) => item.id === "save-review-unavailable"));
+});
+
+test("Save preserves Back, explicit confirmation, loading, errors, expiration and acknowledgement", () => {
+  const { run, render } = screenHarness();
+  run.step = 2;
+  let calls = 0;
+  run.confirm = () => {
+    calls++;
+  };
+  let screen = render();
+  let back = nodes(screen).find((node) => node.type === "Button" && text(node) === "Back");
+  const draft = run.preview;
+  back.props.onPress();
+  assert.equal(run.step, 1);
+  assert.equal(run.preview, draft);
+  run.step = 2;
+  screen = render();
+  let confirm = nodes(screen).find(
+    (node) => node.type === "Button" && text(node) === "Confirm & Save",
+  );
+  assert.equal(calls, 0);
+  confirm.props.onPress();
+  assert.equal(calls, 1);
+  assert.doesNotMatch(text(render()), /Your tailored CV is saved/);
+  run.reviewActivity = "confirm";
+  screen = render();
+  confirm = nodes(screen).find((node) => node.type === "Button" && text(node) === "Saving…");
+  assert.equal(confirm.props.disabled, true);
+  assert.ok(nodes(confirm).some((node) => node.type === "ActivityIndicator"));
+  back = nodes(screen).find((node) => node.type === "Button" && text(node) === "Back");
+  assert.equal(back.props.disabled, true);
+  run.reviewActivity = null;
+  run.reviewProblem = {
+    kind: "retry",
+    message: "The save could not be confirmed. Your draft is preserved.",
+  };
+  screen = render();
+  const list = nodes(screen).find((node) => node.type === "FlatList");
+  assert.ok(
+    nodes(list.props.ListHeaderComponent).some(
+      (node) => node.type === "Notice" && node.props.message === run.reviewProblem.message,
+    ),
+  );
+  assert.equal(run.preview, draft);
+  run.preview.review.preview_expires_at = "2020-01-01T00:00:00Z";
+  screen = render();
+  confirm = nodes(screen).find((node) => node.type === "Button" && text(node) === "Confirm & Save");
+  assert.equal(confirm.props.disabled, true);
+  run.saved = true;
+  assert.match(text(render()), /Your tailored CV is saved/);
 });
