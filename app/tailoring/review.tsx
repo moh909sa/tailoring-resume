@@ -398,69 +398,15 @@ export default function TailoringReviewScreen() {
       });
   }
   if (run.step === 2) {
-    const flaggedChanges = review.change_sections.flatMap((section) =>
-      section.items.filter((change) => change.confidence === "high"),
+    items.push({
+      id: "resume-heading",
+      kind: "heading",
+      title: "Your tailored CV",
+      body: "Read-only review. Editing will be available when draft changes can be saved securely.",
+    });
+    reviewItems(run.preview.preview, "resume").forEach((item) =>
+      items.push({ id: "resume-" + item.id, kind: "resume", item }),
     );
-    const specificWarnings = reviewWarningsForStep(review.warnings, 2);
-    const missingDetails = (review.change_summary.high_risk_changes ?? 0) > flaggedChanges.length;
-    const detailCount = specificWarnings.length + flaggedChanges.length + (missingDetails ? 1 : 0);
-    items.push({
-      id: "save-review-toggle",
-      kind: "section",
-      section: "save-review",
-      title: "Review your information",
-      subtitle: "Make sure all added skills and experience details are accurate before saving.",
-      count: detailCount || undefined,
-      connected: "save-review",
-    });
-    if (expanded.has("save-review")) {
-      specificWarnings.forEach((message, index) =>
-        items.push({
-          id: `save-review-warning-${index}`,
-          kind: "review-note",
-          message,
-          connected: "save-review",
-        }),
-      );
-      flaggedChanges.forEach((change, index) =>
-        items.push({
-          id: `save-review-change-${index}`,
-          kind: "change",
-          change,
-          verification: true,
-          summaryComparison: change.field_type === "summary",
-          descriptionComparison: change.field_type === "description",
-          connected: "save-review",
-        }),
-      );
-      if (missingDetails)
-        items.push({
-          id: "save-review-unavailable",
-          kind: "review-note",
-          connected: "save-review",
-          message:
-            "Some flagged changes have no detailed comparisons available. Reload the review and compare the complete draft against your original CV before saving.",
-        });
-      if (!detailCount)
-        items.push({
-          id: "save-review-general",
-          kind: "review-note",
-          connected: "save-review",
-          message:
-            "Check the complete preview before saving. No specific verification details were returned for this draft.",
-        });
-    }
-    items.push({
-      id: "resume-toggle",
-      kind: "section",
-      title: "Preview updated CV",
-      subtitle: "Read-only text preview of the complete draft",
-      section: "resume",
-    });
-    if (expanded.has("resume"))
-      reviewItems(run.preview.preview, "resume").forEach((item) =>
-        items.push({ id: "resume-" + item.id, kind: "resume", item }),
-      );
   }
 
   function renderItem(item: WizardItem) {
@@ -720,10 +666,6 @@ export default function TailoringReviewScreen() {
             {run.step === 2 ? (
               <>
                 <View className="gap-4 rounded-3xl border border-border bg-card p-4">
-                  <View className="flex-row items-center gap-2">
-                    <LucideIcon name="FileCheck" size={19} className="text-primary" />
-                    <Text className="text-h5 text-foreground">Your tailored CV</Text>
-                  </View>
                   <View className="flex-row gap-2">
                     {[
                       { label: "ATS Score", value: score === null ? null : formatScore(score) },

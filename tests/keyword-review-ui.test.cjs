@@ -343,12 +343,13 @@ test("simplified Changes preserves individual risks, dynamic counts and unmatche
   );
   assert.ok(!list.props.data.some((item) => item.id === "resume-toggle"));
   run.step = 2;
-  let saveList = nodes(render()).find((node) => node.type === "FlatList");
-  assert.equal(
-    saveList.props.data.find((item) => item.id === "resume-toggle").title,
-    "Preview updated CV",
+  const saveList = nodes(render()).find((node) => node.type === "FlatList");
+  assert.ok(saveList.props.data.some((item) => item.id === "resume-heading"));
+  assert.ok(
+    !saveList.props.data.some(
+      (item) => item.id === "resume-toggle" || item.id === "save-review-toggle",
+    ),
   );
-  assert.ok(saveList.props.data.some((item) => item.id === "save-review-toggle"));
   run.step = 1;
   // A warning with an exact comparison path belongs beside that comparison.
   const target = run.preview.review.change_sections.find(
@@ -416,7 +417,7 @@ test("Summary comparisons preserve complete paragraphs with full Before striketh
   );
 });
 
-test("connected accordions have no inter-row gaps and skill additions remain compact with checks in Save", () => {
+test("connected accordions keep compact skill additions without altering verification data", () => {
   const { run, render } = screenHarness();
   run.step = 1;
   let list = nodes(render()).find((node) => node.type === "FlatList");
@@ -460,23 +461,18 @@ test("connected accordions have no inter-row gaps and skill additions remain com
   list = nodes(render()).find((node) => node.type === "FlatList");
   assert.equal(list.props.data.filter((item) => item.connected === "skill").length, 1);
   run.step = 2;
-  let saveList = nodes(render()).find((node) => node.type === "FlatList");
-  saveList.props
-    .renderItem({ item: saveList.props.data.find((item) => item.id === "save-review-toggle") })
-    .props.children.props.onPress();
-  saveList = nodes(render()).find((node) => node.type === "FlatList");
+  const saveList = nodes(render()).find((node) => node.type === "FlatList");
+  assert.ok(saveList.props.data.some((item) => item.kind === "resume"));
   assert.ok(
-    saveList.props.data.some((item) => item.message === run.preview.review.warnings.at(-1)),
-  );
-  assert.ok(
-    saveList.props.data.some(
-      (item) => item.verification && item.change.new_value === skill.change.new_value,
+    !saveList.props.data.some(
+      (item) => item.id === "resume-toggle" || item.id === "save-review-toggle",
     ),
   );
   assert.equal(
-    saveList.props.data.find((item) => item.id === "resume-toggle").title,
-    "Preview updated CV",
+    run.preview.review.warnings.at(-1),
+    "Check additional.technicalSkills against your original CV.",
   );
+  assert.equal(skill.change.confidence, "high");
 });
 
 test("descriptions share Summary replacement treatment without altering backend paragraphs", () => {
@@ -517,12 +513,13 @@ test("descriptions share Summary replacement treatment without altering backend 
   );
 });
 
-test("Save uses three live metrics and one neutral expandable review section, followed by the full preview", () => {
+test("Save keeps live metrics and directly displays the complete read-only resume without accordions", () => {
   const { run, render } = screenHarness();
   run.step = 2;
   run.preview = makeReview("latest-preview", 81, ["PLC", "OPC-UA"], [76, 81]);
-  let screen = render();
-  let list = nodes(screen).find((node) => node.type === "FlatList");
+  const before = JSON.stringify(run.preview);
+  const screen = render();
+  const list = nodes(screen).find((node) => node.type === "FlatList");
   const metrics = nodes(list.props.ListHeaderComponent).filter(
     (node) =>
       node.props.accessibilityLabel &&
@@ -534,45 +531,21 @@ test("Save uses three live metrics and one neutral expandable review section, fo
   );
   assert.ok(metrics.every((node) => node.props.className.includes("flex-1")));
   assert.match(text(list.props.ListHeaderComponent), /Your original CV stays unchanged\./);
-  assert.doesNotMatch(
-    text(list.props.ListHeaderComponent),
-    /high risk change|separate tailored CV|keywords applied to this draft/,
-  );
-  assert.equal(list.props.data[0].title, "Review your information");
-  assert.equal(
-    list.props.data[0].subtitle,
-    "Make sure all added skills and experience details are accurate before saving.",
-  );
-  assert.ok(
-    !list.props.data.some(
-      (item) => item.kind === "warning" || item.kind === "review-note" || item.verification,
-    ),
-  );
-  list.props.renderItem({ item: list.props.data[0] }).props.children.props.onPress();
-  list = nodes(render()).find((node) => node.type === "FlatList");
+  assert.equal(list.props.data[0].title, "Your tailored CV");
+  assert.match(list.props.data[0].body, /Read-only/);
+  assert.ok(!list.props.data.some((item) => item.kind === "section"));
+  const resume = list.props.data.filter((item) => item.kind === "resume");
   assert.deepEqual(
-    list.props.data.filter((item) => item.kind === "review-note").map((item) => item.message),
-    warnings.reviewWarningsForStep(run.preview.review.warnings, 2),
-  );
-  assert.equal(list.props.data.filter((item) => item.verification).length, 2);
-  for (const item of list.props.data.filter((item) => item.kind === "review-note")) {
-    assert.doesNotMatch(
-      list.props.renderItem({ item }).props.children.props.className,
-      /warning|destructive/,
-    );
-  }
-  const preview = list.props.data.find((item) => item.id === "resume-toggle");
-  assert.equal(preview.title, "Preview updated CV");
-  assert.match(preview.subtitle, /Read-only text preview/);
-  list.props.renderItem({ item: preview }).props.children.props.onPress();
-  list = nodes(render()).find((node) => node.type === "FlatList");
-  assert.deepEqual(
-    list.props.data.filter((item) => item.kind === "resume").map((item) => item.item),
+    resume.map((item) => item.item),
     previewContent.reviewItems(run.preview.preview, "resume"),
   );
-  run.preview.review.change_sections = [];
-  list = nodes(render()).find((node) => node.type === "FlatList");
-  assert.ok(list.props.data.some((item) => item.id === "save-review-unavailable"));
+  assert.equal(resume[0].item.id, "personalInfo");
+  assert.ok(!nodes(screen).some((node) => node.type === "TextInput"));
+  assert.equal(
+    JSON.stringify(run.preview),
+    before,
+    "review never changes draft facts or verification flags",
+  );
 });
 
 test("Save preserves Back, explicit confirmation, loading, errors, expiration and acknowledgement", () => {
@@ -623,4 +596,100 @@ test("Save preserves Back, explicit confirmation, loading, errors, expiration an
   assert.equal(confirm.props.disabled, true);
   run.saved = true;
   assert.match(text(render()), /Your tailored CV is saved/);
+});
+
+test("resume ordering uses standards, retains unknown content and handles additional/custom containers", () => {
+  const resume = {
+    extraResearch: "Kept unknown research",
+    additional: {
+      languages: ["English"],
+      certificationsTraining: ["Actual certification"],
+      technicalSkills: ["PLC"],
+      professionalSkills: ["Leadership"],
+      awards: ["Actual award"],
+    },
+    personalProjects: [{ name: "Actual project", description: ["Real project details"] }],
+    education: [{ degree: "Actual degree" }],
+    workExperience: [
+      { title: "Engineer", description: ["First bullet"] },
+      { title: "Analyst", description: ["Second bullet"] },
+    ],
+    summary: "Complete original paragraph.\n\nSecond paragraph.",
+    personalInfo: {
+      github: "https://example.invalid/code",
+      name: "Full Name",
+      email: "name@example.invalid",
+      title: "Engineer",
+      phone: "123",
+      location: "City",
+      telegram: "@realcontact",
+    },
+    customSections: {
+      community: { sectionType: "text", text: "Actual community work" },
+      empty: { sectionType: "stringList", strings: [] },
+    },
+  };
+  const before = JSON.stringify(resume);
+  const items = previewContent.orderedResumeItems(resume);
+  assert.deepEqual(
+    items.map((item) => item.id),
+    [
+      "personalInfo",
+      "summary",
+      "workExperience0",
+      "workExperience1",
+      "education0",
+      "additional.technicalSkills",
+      "additional.professionalSkills",
+      "additional.certificationsTraining",
+      "personalProjects0",
+      "additional.languages",
+      "customSections.community",
+      "extraResearch",
+      "additional.awards",
+    ],
+  );
+  assert.equal(items.find((item) => item.id === "workExperience1").continuation, true);
+  assert.equal(items.find((item) => item.id === "workExperience0").continuation, false);
+  assert.equal(items.find((item) => item.id === "summary").value, resume.summary);
+  assert.equal(
+    items.find((item) => item.id === "customSections.community").value,
+    resume.customSections.community,
+  );
+  const profile = previewContent.ReviewContent({ item: items[0] });
+  assert.match(
+    text(profile),
+    /^Full NameEngineername@example.invalid · 123 · City · https:\/\/example.invalid\/code/,
+  );
+  assert.ok(nodes(profile).some((node) => node.props.value?.telegram === "@realcontact"));
+  assert.equal(JSON.stringify(resume), before);
+});
+
+test("explicit sectionMeta order and user section names survive while identity always stays first", () => {
+  const resume = {
+    education: [{ degree: "Degree" }],
+    summary: "Summary",
+    personalInfo: { name: "Name" },
+    additional: { technicalSkills: ["Python"] },
+    customSections: { volunteer: { sectionType: "text", text: "Actual volunteering" } },
+    sectionMeta: [
+      { key: "customSections.volunteer", displayName: "Community Service", order: 1 },
+      { key: "education", order: 2 },
+      { key: "summary", order: 3 },
+      { key: "technicalSkills", order: 4 },
+    ],
+  };
+  const items = previewContent.orderedResumeItems(resume);
+  assert.deepEqual(
+    items.map((item) => item.id),
+    [
+      "personalInfo",
+      "customSections.volunteer",
+      "education0",
+      "summary",
+      "additional.technicalSkills",
+    ],
+  );
+  assert.equal(items[1].label, "Community Service");
+  assert.ok(!items.some((item) => item.id === "sectionMeta"));
 });

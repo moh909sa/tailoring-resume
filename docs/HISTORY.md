@@ -21,3 +21,5 @@
 - Review Changes uses connected accordions, compact added skills, and full description comparisons; Save holds the updated CV preview and outstanding added-skill checks.
 
 - Save uses three live metrics and a neutral expandable verification review, retaining all safety details and explicit authenticated confirmation.
+
+- Save displays an ordered complete CV directly; inline editing remains unavailable until authenticated versioned draft updates and revision-bound confirmation are supported.

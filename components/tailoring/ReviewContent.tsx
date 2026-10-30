@@ -43,6 +43,7 @@ const hidden = new Set([
   "paths",
   "field_path",
   "rewritten_paths",
+  "sectionType",
 ]);
 export function readableLabel(key: string): string {
   if (labels[key]) return labels[key];
@@ -56,7 +57,14 @@ export function hasContent(value: JsonValue | undefined): value is Exclude<JsonV
     return Object.entries(value).some(([key, item]) => !hidden.has(key) && hasContent(item));
   return true;
 }
-export type ReviewItem = { id: string; label: string; value: JsonValue };
+export type ReviewItem = {
+  id: string;
+  label: string;
+  value: JsonValue;
+  continuation?: boolean;
+  profile?: boolean;
+  custom?: boolean;
+};
 function entries(key: string, value: JsonValue | undefined): ReviewItem[] {
   if (!hasContent(value)) return [];
   if (Array.isArray(value) && value.some(isJsonObject))
@@ -65,17 +73,106 @@ function entries(key: string, value: JsonValue | undefined): ReviewItem[] {
       .map((item, index) => ({ id: key + index, label: readableLabel(key), value: item }));
   return [{ id: key, label: readableLabel(key), value }];
 }
+// Presentation-only mapping: values are references to the original structured
+// draft. Metadata controls ordering without rewriting or mutating the resume.
+export function orderedResumeItems(resume: JsonObject): ReviewItem[] {
+  const ranks: Record<string, number> = {
+    personalInfo: 0,
+    personalInformation: 0,
+    summary: 1,
+    professionalSummary: 1,
+    workExperience: 2,
+    experience: 2,
+    education: 3,
+    technicalSkills: 4,
+    professionalSkills: 4,
+    skills: 4,
+    certificationsTraining: 5,
+    certifications: 5,
+    training: 5,
+    personalProjects: 6,
+    projects: 6,
+    languages: 7,
+  };
+  const titles: Record<string, string> = {
+    personalInfo: "Personal information",
+    personalInformation: "Personal information",
+    summary: "Professional Summary",
+    professionalSummary: "Professional Summary",
+    workExperience: "Work Experience",
+    experience: "Work Experience",
+    education: "Education",
+    technicalSkills: "Technical Skills",
+    professionalSkills: "Professional Skills",
+    skills: "Skills",
+    certificationsTraining: "Certifications and Training",
+    certifications: "Certifications",
+    training: "Training",
+    personalProjects: "Projects",
+    projects: "Projects",
+    languages: "Languages",
+  };
+  const metadata = Array.isArray(resume.sectionMeta) ? resume.sectionMeta.filter(isJsonObject) : [];
+  const sections: { key: string; field: string; value: JsonValue; custom: boolean }[] = [];
+  for (const [key, value] of Object.entries(resume)) {
+    if (hidden.has(key)) continue;
+    if ((key === "additional" || key === "customSections") && isJsonObject(value)) {
+      for (const [field, content] of Object.entries(value)) {
+        if (!hidden.has(field))
+          sections.push({
+            key: key + "." + field,
+            field,
+            value: content,
+            custom: key === "customSections",
+          });
+      }
+    } else sections.push({ key, field: key, value, custom: false });
+  }
+  const positioned = sections
+    .filter((section) => hasContent(section.value))
+    .map((section, index) => {
+      const exact = metadata.find((meta) => meta.key === section.key || meta.key === section.field);
+      const meta = exact ?? metadata.find((meta) => meta.key === section.key.split(".")[0]);
+      const order =
+        typeof meta?.order === "number" && Number.isFinite(meta.order) ? meta.order : null;
+      const rank = section.custom ? 8 : (ranks[section.field] ?? 9);
+      const customId = /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(section.field);
+      const label =
+        typeof exact?.displayName === "string" && exact.displayName.trim()
+          ? exact.displayName
+          : (titles[section.field] ??
+            (customId ? "Additional section" : readableLabel(section.field)));
+      return { ...section, label, order, rank, index };
+    });
+  positioned.sort((a, b) => {
+    // Identity and contacts always introduce the CV. Honor explicit original
+    // sectionMeta order for the remaining sections; use standard order otherwise.
+    if (a.rank === 0 || b.rank === 0)
+      return a.rank === b.rank ? a.index - b.index : a.rank === 0 ? -1 : 1;
+    if (a.order !== null || b.order !== null) {
+      const difference = (a.order ?? Infinity) - (b.order ?? Infinity);
+      if (difference) return difference;
+    }
+    return a.rank - b.rank || a.index - b.index;
+  });
+  return positioned.flatMap((section) =>
+    entries(section.key, section.value).map((item, index) => ({
+      ...item,
+      label: section.label,
+      continuation: index > 0,
+      profile: section.rank === 0,
+      custom: section.custom,
+    })),
+  );
+}
+
 export function reviewItems(
   preview: JsonObject,
   tab: "resume" | "analysis" | "changes",
 ): ReviewItem[] {
   if (tab === "resume") {
     const resume = preview.resume_preview;
-    return isJsonObject(resume)
-      ? Object.entries(resume)
-          .filter(([key]) => !hidden.has(key))
-          .flatMap(([key, value]) => entries(key, value))
-      : [];
+    return isJsonObject(resume) ? orderedResumeItems(resume) : [];
   }
   const keys =
     tab === "analysis"
@@ -121,41 +218,50 @@ function ValueView({ value }: { value: JsonValue }) {
 
 export function ReviewContent({ item }: { item: ReviewItem }) {
   const value = item.value;
-  if (item.id === "personalInfo" && isJsonObject(value)) {
-    const contact = [
-      value.email,
-      value.phone,
-      value.location,
-      value.website,
-      value.linkedin,
-      value.github,
-    ].filter((v): v is string => typeof v === "string" && !!v);
+  if ((item.profile || item.id === "personalInfo") && isJsonObject(value)) {
+    const nameKey = ["name", "fullName", "full_name"].find(
+      (key) => typeof value[key] === "string" && hasContent(value[key]),
+    );
+    const titleKey = ["title", "professionalTitle", "professional_title"].find(
+      (key) => typeof value[key] === "string" && hasContent(value[key]),
+    );
+    const contactKeys = ["email", "phone", "location", "website", "linkedin", "github"];
+    const contact = contactKeys.filter(
+      (key) => typeof value[key] === "string" && hasContent(value[key]),
+    );
+    const used = new Set([nameKey, titleKey, ...contact]);
+    const remaining = Object.fromEntries(Object.entries(value).filter(([key]) => !used.has(key)));
     return (
-      <View className="mb-6 gap-2 border-b border-border pb-6">
-        {typeof value.name === "string" ? (
+      <View className="mb-6 gap-3 border-b border-border pb-6">
+        {nameKey ? (
           <Text selectable className="text-h2 text-foreground">
-            {value.name}
+            {String(value[nameKey])}
           </Text>
         ) : null}
-        {typeof value.title === "string" && value.title ? (
-          <Text className="text-body text-primary">{value.title}</Text>
+        {titleKey ? (
+          <Text selectable className="text-body text-primary">
+            {String(value[titleKey])}
+          </Text>
         ) : null}
         {contact.length ? (
           <Text selectable className="text-caption leading-5 text-muted-foreground">
-            {contact.join(" · ")}
+            {contact.map((key) => String(value[key])).join(" · ")}
           </Text>
         ) : null}
+        {hasContent(remaining) ? <ValueView value={remaining} /> : null}
       </View>
     );
   }
   const isChange = item.id.startsWith("detailed_changes") && isJsonObject(value);
   return (
     <View className="mb-5 gap-4 rounded-2xl border border-border bg-card p-5">
-      <Text accessibilityRole="header" className="text-h4 text-foreground">
-        {isChange && typeof value.field_type === "string"
-          ? readableLabel(value.field_type)
-          : item.label}
-      </Text>
+      {!item.continuation ? (
+        <Text accessibilityRole="header" className="text-h4 text-foreground">
+          {isChange && typeof value.field_type === "string"
+            ? readableLabel(value.field_type)
+            : item.label}
+        </Text>
+      ) : null}
       {isChange ? (
         <View className="gap-4">
           {hasContent(value.original_value) ? (
@@ -175,6 +281,19 @@ export function ReviewContent({ item }: { item: ReviewItem }) {
               {readableLabel(value.change_type)}
             </Text>
           ) : null}
+        </View>
+      ) : item.custom && isJsonObject(value) ? (
+        <View className="gap-4">
+          {["text", "strings", "items"]
+            .filter((key) => hasContent(value[key]))
+            .map((key) => (
+              <ValueView key={key} value={value[key]} />
+            ))}
+          <ValueView
+            value={Object.fromEntries(
+              Object.entries(value).filter(([key]) => !["text", "strings", "items"].includes(key)),
+            )}
+          />
         </View>
       ) : (
         <ValueView value={value} />
