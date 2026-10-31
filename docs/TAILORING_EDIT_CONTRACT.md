@@ -1,26 +1,27 @@
-# Required mobile tailoring edit contract
+# Saved mobile CV editing contract
 
-The deployed OpenAPI schema exposes no authenticated mobile operation for editing a tailoring draft. `POST /api/v1/mobile/tailor/{tailoring_id}/confirm` has no request body and approves the saved server-generated preview. `PATCH /api/v1/mobile/resumes/{resume_id}` only renames a resume. The separate `PATCH /api/v1/resumes/{resume_id}` updates a resume, but does not provide a mobile tailoring-draft revision or a documented link to mobile confirmation; the app must not substitute it for draft editing or risk changing the master CV.
+The tailoring review remains read-only. After Keywords and Changes, Confirm & Save sends `expected_preview_id` to `POST /api/v1/mobile/tailor/{tailoring_id}/confirm`. Railway atomically rejects a changed preview. A successful acknowledgement opens the saved tailored CV editor; older bodyless confirmation clients remain compatible.
 
-Until the following contract exists, Save displays a read-only draft. No local edit fields or edited-save claims are exposed. Existing confirmation continues to save the server preview after the existing latest-draft and expiry checks.
+All editor operations require the existing Supabase bearer session and ownership of the tailoring record and its saved engine resume. They never modify the uploaded original. The unauthenticated desktop routes stay blocked in mobile deployments.
 
-## Structured draft update
+## Canonical document and autosave
 
-A proposed operation is `PATCH /api/v1/mobile/tailor/{tailoring_id}/draft` (this endpoint is a requirement, not an implemented route).
+- `GET /api/v1/mobile/tailored-cvs/{id}/editor` returns `tailoring_id`, integer `revision`, `updated_at`, structured `resume`, job context, `confirmed_skills`, and optional analysis. This is current engine content, not the original confirmation snapshot.
+- `PATCH` on the same route accepts `expected_revision`, a secure UUID `mutation_id`, `resume`, and `confirmed_skills`. The existing schema is validated while raw fields and metadata are preserved. User edits do not run AI rewriting or overwrite their original CV.
+- Content, immutable revisions, and mutation receipts are saved atomically in the existing private mobile engine database on Railway’s persistent volume. A repeated mutation returns its own acknowledgement; different content cannot reuse the same mutation ID. Stale versions return 409. Invalid documents return 422 without replacing the last valid revision.
+- Frontend recovery drafts include the canonical base revision, latest edits, confirmations, and any pending mutation. They are scoped by account and document, written before transport, and retained after ambiguous failures. Session generations fence late writes. Conflicts require an explicit choice; exports wait for the latest saved acknowledgement.
+- `GET /api/v1/mobile/tailored-cvs?status=ready&limit=30&offset=0` lists owned saved documents and canonical save timestamps for reopening.
 
-- Authenticate with the current Supabase bearer token and enforce ownership of the tailoring job and draft.
-- Accept `expected_preview_id` and `resume`, where `resume` contains the structured CV schema, including original section metadata and existing custom sections.
-- Accept a client-generated `mutation_id` for idempotency so an ambiguous network response can be reconciled without duplicating a revision.
-- Validate structured fields and factual/grounding constraints on the server. Preserve edit provenance as user-authored, without treating edits as automatic attestation of accuracy.
-- Preserve the original master CV; store edits only as a new tailoring-draft revision.
-- Return the canonical updated `preview` and `review` objects with a new `preview.preview_id`, expiry, and current verification flags/warnings. `GET /review` must return the same revision.
-- Explicitly report whether ATS analysis is current for that revision. Keep the earlier score identified as an earlier analysis if no recalculation occurs; never imply an updated score.
-- Return clear authentication, ownership, validation, expired-preview, and stale-version failures (401, 403/404, 422, 410, and 409). Validation failures must preserve the last valid revision.
+## Job Match
 
-## Confirmation bound to the edited revision
+`GET/POST /api/v1/mobile/tailored-cvs/{id}/ats-score` retrieves or recalculates analysis; POST accepts `expected_revision`. Results include current/stale/unavailable status, analyzed revision, calculation time, job hash, scoring version, score breakdown, complete matched/missing evidence, and required/preferred skills. Recalculation is deterministic from cached job extraction, without AI generation. Missing extraction remains unavailable rather than a fabricated score. Rendering and scoring normalize visible supported content consistently.
 
-The authenticated mobile confirmation operation must accept `expected_preview_id` and atomically reject a different or expired current revision. A preflight GET alone does not guarantee that confirmation targets the edited revision if another request changes the draft between GET and POST.
+User-confirmed skills can be saved freely alongside their resume edits. Confirmation means the user personally attested possession; it does not fabricate work history, certificates, or achievements.
 
-Confirmation must retain existing factual checks, be replay-safe, and return a saved acknowledgement identifying the confirmed revision. The UI may show success only after that acknowledgement. A failed edit update must never fall through to confirmation of the older preview.
+## Actual PDF preview and export
 
-No backend or service configuration changes are part of the UI implementation.
+`GET /api/v1/mobile/tailored-cvs/{id}/pdf?revision=N&page_size=A4|LETTER` exports the identified immutable revision using the existing single-column Resume-Matcher print pipeline. Responses are authenticated, private/no-store PDFs with `X-Resume-Revision`, `X-PDF-Page-Count`, and `Content-Disposition` exposed to allowed browser origins. Missing layout metadata is completed without dropping populated supported/custom sections; explicit visibility flags remain respected.
+
+The app validates the PDF response and displays/downloads the same artifact. iOS uses a cached file, WebView, and the native share sheet; web uses a Blob iframe/download. `POST /api/v1/mobile/tailored-cvs/{id}/parse-check` accepts `expected_revision` and `page_size` and checks a render of that same frozen document/settings. Readability checks are advisory and distinct from job match.
+
+Arbitrary unknown raw fields survive editing/storage; the existing print templates render the supported resume schema and `customSections`. Native PDF display and Save to Files must be checked on an iPhone simulator or published build.

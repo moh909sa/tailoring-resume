@@ -25,3 +25,5 @@
 - Save displays an ordered complete CV directly; inline editing remains unavailable until authenticated versioned draft updates and revision-bound confirmation are supported.
 
 - The read-only Save CV uses a continuous professional document layout with shared section headings, subtle dividers, and grouped entries.
+
+- Confirm & Save hands off to a durable saved-CV editor with account-scoped recovery, revision-safe autosaves, explicit skill confirmation, current job-match analysis, and actual revision-bound PDF preview/export.
