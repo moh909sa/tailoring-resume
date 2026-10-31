@@ -556,6 +556,7 @@ export function TailoringProvider({ children }: { children: ReactNode }) {
               ownerId,
               draft.tailoring_id,
               controller.signal,
+              latest.preview.preview_id,
             );
             if (activeRequest(controller))
               update((value) => ({ ...value, confirmation, saved: true, reviewProblem: null }));

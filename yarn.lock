@@ -1550,6 +1550,27 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@expo/config-plugins@npm:^55.0.12":
+  version: 55.0.12
+  resolution: "@expo/config-plugins@npm:55.0.12"
+  dependencies:
+    "@expo/config-types": "npm:^55.0.6"
+    "@expo/json-file": "npm:~10.0.15"
+    "@expo/plist": "npm:^0.5.4"
+    "@expo/sdk-runtime-versions": "npm:^1.0.0"
+    chalk: "npm:^4.1.2"
+    debug: "npm:^4.3.5"
+    getenv: "npm:^2.0.0"
+    glob: "npm:^13.0.0"
+    resolve-from: "npm:^5.0.0"
+    semver: "npm:^7.5.4"
+    slugify: "npm:^1.6.6"
+    xcode: "npm:^4.0.0"
+    xml2js: "npm:0.6.0"
+  checksum: 10c0/75d4eefd8bfd6c7d2caed3692fe18c05ee391592115b3bc455baefebb809b3530b2ae320b2565a54632ad7f68c2b8c42c6670fcf08330799ae42d5be78eaa619
+  languageName: node
+  linkType: hard
+
 "@expo/config-plugins@npm:~55.0.11":
   version: 55.0.11
   resolution: "@expo/config-plugins@npm:55.0.11"
@@ -5603,6 +5624,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"bplist-creator@npm:0.1.1":
+  version: 0.1.1
+  resolution: "bplist-creator@npm:0.1.1"
+  dependencies:
+    stream-buffers: "npm:2.2.x"
+  checksum: 10c0/427ec37263ce0e8c68a83f595fc9889a9cbf2e6fda2de18e1f8ef7f0c6ce68c0cdbb7c9c1f3bb3f2d217407af8cffbdf254bf0f71c99f2186175d07752f08a47
+  languageName: node
+  linkType: hard
+
 "bplist-parser@npm:0.3.1":
   version: 0.3.1
   resolution: "bplist-parser@npm:0.3.1"
@@ -5612,7 +5642,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"bplist-parser@npm:^0.3.1":
+"bplist-parser@npm:0.3.2, bplist-parser@npm:^0.3.1":
   version: 0.3.2
   resolution: "bplist-parser@npm:0.3.2"
   dependencies:
@@ -7141,6 +7171,21 @@ __metadata:
   languageName: node
   linkType: hard
 
+"expo-sharing@npm:~55.0.25":
+  version: 55.0.25
+  resolution: "expo-sharing@npm:55.0.25"
+  dependencies:
+    "@expo/config-plugins": "npm:^55.0.12"
+    "@expo/config-types": "npm:^55.0.6"
+    "@expo/plist": "npm:^0.5.4"
+  peerDependencies:
+    expo: "*"
+    react: "*"
+    react-native: "*"
+  checksum: 10c0/d2c5cd937330fe7ad0b09eccc665051478719668adcd25abe8719be96ed5dcf48941031ae06bd444a9db5d072700f3e45dce6a35ff1a7f41647fcb9c7aa58e26
+  languageName: node
+  linkType: hard
+
 "expo-splash-screen@npm:~55.0.24":
   version: 55.0.24
   resolution: "expo-splash-screen@npm:55.0.24"
@@ -8042,7 +8087,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"invariant@npm:^2.2.4":
+"invariant@npm:2.2.4, invariant@npm:^2.2.4":
   version: 2.2.4
   resolution: "invariant@npm:2.2.4"
   dependencies:
@@ -9926,6 +9971,7 @@ __metadata:
     expo-linking: "npm:~55.0.17"
     expo-navigation-bar: "npm:~55.0.16"
     expo-router: "npm:~55.0.18"
+    expo-sharing: "npm:~55.0.25"
     expo-splash-screen: "npm:~55.0.24"
     expo-status-bar: "npm:~55.0.6"
     expo-system-ui: "npm:~55.0.21"
@@ -9947,6 +9993,7 @@ __metadata:
     react-native-svg: "npm:15.15.3"
     react-native-url-polyfill: "npm:^4.0.0"
     react-native-web: "npm:^0.21.0"
+    react-native-webview: "npm:13.16.0"
     react-native-worklets: "npm:0.7.4"
     tailwind-merge: "npm:^3.3.1"
     tailwindcss: "npm:^3.4.0"
@@ -10995,6 +11042,19 @@ __metadata:
   languageName: node
   linkType: hard
 
+"react-native-webview@npm:13.16.0":
+  version: 13.16.0
+  resolution: "react-native-webview@npm:13.16.0"
+  dependencies:
+    escape-string-regexp: "npm:^4.0.0"
+    invariant: "npm:2.2.4"
+  peerDependencies:
+    react: "*"
+    react-native: "*"
+  checksum: 10c0/813c3cb176effd65f8d9b45eb00732ac87bfab2d0b1c4016f0d43e95f9a287e495913540ebe4f47da868c804f6fdcb2246a2156d6e31712bd426b43bcecc8e7f
+  languageName: node
+  linkType: hard
+
 "react-native-worklets@npm:0.7.4":
   version: 0.7.4
   resolution: "react-native-worklets@npm:0.7.4"
@@ -11699,6 +11759,17 @@ __metadata:
     bplist-parser: "npm:0.3.1"
     plist: "npm:^3.0.5"
   checksum: 10c0/3d5adeb705815338b1f4615c52584d540b12575337a0e0688f0a2b19a6a4162769cd8a3a36e9eb2b0fc9e27d63dcba8b9088a13e93eabcb7cdec5fe90ec5b0a5
+  languageName: node
+  linkType: hard
+
+"simple-plist@npm:^1.3.1":
+  version: 1.4.0
+  resolution: "simple-plist@npm:1.4.0"
+  dependencies:
+    bplist-creator: "npm:0.1.1"
+    bplist-parser: "npm:0.3.2"
+    plist: "npm:^3.0.5"
+  checksum: 10c0/226c283492d8518d715e4133d94bdbd15c0619561bcde583b4807b36cde106c0078c615b9b4e25c0e8758a4ae4e79ed5dd76e57cd528d8b7001ecab5ad35e343
   languageName: node
   linkType: hard
 
@@ -12867,6 +12938,15 @@ __metadata:
     simple-plist: "npm:^1.1.0"
     uuid: "npm:^7.0.3"
   checksum: 10c0/51bf35cee52909aeb18f868ecf9828f93b8042fadf968159320f9f11e757a52e43f6563a53b586986cfe5a34d576f3300c4c0cf1e14300084344ae206eaa53c3
+  languageName: node
+  linkType: hard
+
+"xcode@npm:^4.0.0":
+  version: 4.0.0
+  resolution: "xcode@npm:4.0.0"
+  dependencies:
+    simple-plist: "npm:^1.3.1"
+  checksum: 10c0/cbb3510eda03636a1594476978f48eebea88a9d8c8ba506df0366c007581774551bb45ca8b511c6a41fc4b6b564958e765c89ad31d8aabec4e4f8f993c8a7fc6
   languageName: node
   linkType: hard
 

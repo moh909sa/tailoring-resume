@@ -32,10 +32,11 @@ export class CvApiError extends Error {
   }
 }
 
-function endpoint(path: string): string {
+export function mobileEndpoint(path: string): string {
   if (!API_URL) throw new Error("The CV service is not configured. Please contact support.");
   return API_URL + "/api/v1/mobile" + path;
 }
+const endpoint = mobileEndpoint;
 
 export function apiErrorMessage(
   status: number,
@@ -68,7 +69,7 @@ function decodeResponse(text: string): unknown {
   }
 }
 
-async function accessToken(ownerId: string, forceRefresh = false): Promise<string> {
+export async function mobileAccessToken(ownerId: string, forceRefresh = false): Promise<string> {
   if (!supabase) throw new Error("Please sign in before uploading a CV.");
   const { data, error } = await supabase.auth.getSession();
   if (error || !data.session?.access_token || data.session.user.id !== ownerId) {
@@ -87,6 +88,7 @@ async function accessToken(ownerId: string, forceRefresh = false): Promise<strin
   }
   return data.session.access_token;
 }
+const accessToken = mobileAccessToken;
 
 export async function listResumes(ownerId: string, signal: AbortSignal): Promise<Resume[]> {
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -390,8 +392,9 @@ export function confirmTailoring(
   ownerId: string,
   tailoringId: string,
   signal: AbortSignal,
+  expectedPreviewId?: string,
 ): Promise<TailoringConfirmation> {
-  // The mobile contract takes no body and atomically confirms its latest stored draft.
+  // New clients bind approval to the exact reviewed preview; old callers remain compatible.
   return tailoringRequest(
     ownerId,
     "/tailor/" + encodeURIComponent(tailoringId) + "/confirm",
@@ -403,6 +406,7 @@ export function confirmTailoring(
       return confirmation;
     },
     "POST",
+    expectedPreviewId ? { expected_preview_id: expectedPreviewId } : undefined,
   );
 }
 

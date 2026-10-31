@@ -127,6 +127,10 @@ export default function TailoringReviewScreen() {
   useEffect(() => {
     list.current?.scrollToOffset({ offset: 0, animated: false });
   }, [run.step, run.preview?.tailoring_id]);
+  useEffect(() => {
+    const savedId = run.confirmation?.tailoring_id ?? run.preview?.tailoring_id;
+    if (run.saved && savedId) router.replace({ pathname: "/cv-editor/[id]", params: { id: savedId } });
+  }, [run.saved, run.confirmation?.tailoring_id, run.preview?.tailoring_id]);
 
   function close() {
     if (busy) return;
